@@ -1,0 +1,341 @@
+import type { jsPDF as JsPDF } from 'jspdf';
+import type { AnalysisResult } from '../core/runner.ts';
+import type { DoseSet } from '../dicom/group.ts';
+import { doseColorMap, gammaColorMap, type ColorMap } from '../ui/colormap.ts';
+import { drawHistogram, LIGHT_CHART_THEME } from '../ui/histogram-chart.ts';
+import { histSpecs, type DdUnit, type Derived } from '../ui/results.ts';
+import { drawSlice, PLANES, renderSlice, voxelToImage, type Ijk, type Plane } from '../ui/slice.ts';
+
+export interface ReportSide {
+  set: DoseSet;
+  scale: number;
+}
+
+export interface ReportInput {
+  version: string;
+  result: AnalysisResult;
+  derived: Derived;
+  ddUnit: DdUnit;
+  ref: ReportSide;
+  ev: ReportSide;
+  displayMax: number;
+  warnings: string[];
+  cursor: Ijk;
+  includePatient: boolean;
+  reviewer: string;
+  comment: string;
+}
+
+const FONT = 'NotoSansJP';
+let fontCache: Promise<{ regular: string; bold: string }> | null = null;
+
+function toBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let s = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) s += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  return btoa(s);
+}
+
+/** 日本語フォントは PDF 出力時に初めて読み込む (約 5MB ×2、以後はキャッシュ) */
+function loadFonts(): Promise<{ regular: string; bold: string }> {
+  fontCache ??= (async () => {
+    const get = async (file: string) => {
+      const res = await fetch(`${import.meta.env.BASE_URL}fonts/${file}`);
+      if (!res.ok) throw new Error(`フォントを読み込めません (${file})`);
+      return toBase64(await res.arrayBuffer());
+    };
+    const [regular, bold] = await Promise.all([get('NotoSansJP-Regular.ttf'), get('NotoSansJP-Bold.ttf')]);
+    return { regular, bold };
+  })().catch((e) => {
+    fontCache = null;
+    throw e;
+  });
+  return fontCache;
+}
+
+const fmt = (v: number, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '–');
+const pad2 = (n: number) => String(n).padStart(2, '0');
+function stamp(d: Date, sep = ' '): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}${sep}${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function colorbarPng(cmap: ColorMap): string {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 8;
+  const ctx = c.getContext('2d')!;
+  for (let x = 0; x < 256; x++) {
+    const v = cmap.min + ((x + 0.5) / 256) * (cmap.max - cmap.min);
+    const rgb = cmap.rgb(v) ?? [0, 0, 0];
+    ctx.fillStyle = `rgb(${rgb.join(',')})`;
+    ctx.fillRect(x, 0, 1, 8);
+  }
+  return c.toDataURL('image/png');
+}
+
+export async function generateReport(input: ReportInput): Promise<Blob> {
+  const [{ jsPDF }, fonts] = await Promise.all([import('jspdf'), loadFonts()]);
+  const doc: JsPDF = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+  doc.addFileToVFS('NotoSansJP-Regular.ttf', fonts.regular);
+  doc.addFont('NotoSansJP-Regular.ttf', FONT, 'normal');
+  doc.addFileToVFS('NotoSansJP-Bold.ttf', fonts.bold);
+  doc.addFont('NotoSansJP-Bold.ttf', FONT, 'bold');
+
+  const { result: r, derived: d } = input;
+  const p = r.params;
+  const now = new Date();
+  const W = 210;
+  const M = 14;
+  const CW = W - 2 * M;
+  const ink = (g: number) => doc.setTextColor(g, g, g);
+
+  const text = (s: string, x: number, y: number, size = 9, weight: 'normal' | 'bold' = 'normal', opts?: { align?: 'left' | 'right' | 'center' }) => {
+    doc.setFont(FONT, weight);
+    doc.setFontSize(size);
+    doc.text(s, x, y, { baseline: 'top', ...opts });
+  };
+
+  const heading = (s: string, y: number): number => {
+    ink(20);
+    text(s, M, y, 11, 'bold');
+    doc.setDrawColor(200);
+    doc.setLineWidth(0.2);
+    doc.line(M, y + 6, W - M, y + 6);
+    return y + 9;
+  };
+
+  /** key-value の表を cols 列で並べ、下端の y を返す (値は折り返し可) */
+  const kvTable = (rows: [string, string][], y0: number, cols = 1, keyW = 28): number => {
+    const colW = CW / cols;
+    let rowTop = y0;
+    for (let i = 0; i < rows.length; i += cols) {
+      let rowBottom = rowTop;
+      rows.slice(i, i + cols).forEach(([k, v], c) => {
+        const x = M + c * colW;
+        ink(90);
+        text(k, x, rowTop, 8.5);
+        ink(15);
+        const lines = doc.setFont(FONT, 'normal').setFontSize(8.5).splitTextToSize(v, colW - keyW - 2) as string[];
+        doc.text(lines, x + keyW, rowTop, { baseline: 'top' });
+        rowBottom = Math.max(rowBottom, rowTop + lines.length * 4.2 + 1);
+      });
+      rowTop = rowBottom;
+    }
+    return rowTop;
+  };
+
+  // ───── 1 ページ目 ─────
+  ink(10);
+  text('3D ガンマ解析レポート', M, 13, 16, 'bold');
+  ink(90);
+  text(`作成日時 ${stamp(now)}`, W - M, 15, 8.5, 'normal', { align: 'right' });
+
+  let y = heading('データ', 26);
+  const side = (s: ReportSide) =>
+    `${s.set.label}\n${s.set.doses.length} ファイル / ${s.set.summary}${s.scale !== 1 ? ` / 係数 ×${s.scale}` : ''}`;
+  const sameFor = input.ref.set.frameOfReferenceUID === input.ev.set.frameOfReferenceUID;
+  const patient = input.includePatient
+    ? `${input.ref.set.patientName || '(氏名なし)'}  /  ID: ${input.ref.set.patientId || '–'}`
+    : '(非表示)';
+  y = kvTable(
+    [
+      ['患者', patient],
+      ['比較元 (Ref)', side(input.ref)],
+      ['比較先 (Eval)', side(input.ev)],
+      ['座標系', sameFor ? 'FrameOfReferenceUID 一致' : 'FrameOfReferenceUID 不一致 (位置合わせなしで比較)'],
+    ],
+    y,
+  );
+
+  y = heading('解析条件', y + 3);
+  const [nx, ny, nz] = r.ref.dims;
+  y = kvTable(
+    [
+      ['基準', `${p.ddPercent}% / ${p.dtaMm} mm`],
+      ['正規化', p.local ? 'Local (局所線量)' : 'Global'],
+      ['基準線量', `${p.normDoseGy.toFixed(3)} Gy`],
+      ['γ 閾値', `${p.gammaThresholdPercent}% (${((p.gammaThresholdPercent / 100) * p.normDoseGy).toFixed(3)} Gy)`],
+      ['DD 閾値', `${p.ddThresholdPercent}%${p.ddLowGradientOnly ? ` / 勾配 < ${p.gradientThresholdPercentPerMm}%/mm のみ` : ''}`],
+      ['DTA 対象', `勾配 ≥ ${p.gradientThresholdPercentPerMm}%/mm かつ γ 閾値以上`],
+      ['γ 上限', `${p.gammaCap} (探索半径 ${(p.gammaCap * p.dtaMm).toFixed(1)} mm)`],
+      ['探索刻み', `${(p.dtaMm / p.stepsPerDta).toFixed(2)} mm (局所詰め 1/8 刻みまで)`],
+      ['計算格子', `比較元の格子 ${nx}×${ny}×${nz}`],
+      ['比較先', '三線形補間'],
+    ],
+    y,
+    2,
+    20,
+  );
+
+  // 結果
+  y = heading('結果', y + 3);
+  const boxW = (CW - 8) / 3;
+  const boxes: { title: string; big: string; lines: [string, string][] }[] = [
+    {
+      title: 'ガンマ',
+      big: `${fmt(d.gamma.passRate, 2)}%`,
+      lines: [
+        ['評価点数', d.gamma.evaluated.toLocaleString()],
+        ['平均 / 中央値', `${fmt(d.gamma.mean, 3)} / ${fmt(d.gamma.median, 3)}`],
+        ['γ1% (99%値)', fmt(d.gamma.p99, 3)],
+        ['最大', d.gamma.maxCapped ? `≥ ${p.gammaCap}` : fmt(d.gamma.max, 3)],
+      ],
+    },
+    {
+      title: `線量差 (±${p.ddPercent}% 以内)`,
+      big: `${fmt(d.dd.passRate, 2)}%`,
+      lines: [
+        ['評価点数', d.dd.evaluated.toLocaleString()],
+        ['平均 ± SD', `${fmt(d.dd.meanPct, 2)} ± ${fmt(d.dd.sdPct, 2)}%`],
+        ['最小 / 最大', `${fmt(d.dd.minPct, 2)} / ${fmt(d.dd.maxPct, 2)}%`],
+        ['', ''],
+      ],
+    },
+    {
+      title: `DTA (≤ ${p.dtaMm} mm)`,
+      big: `${fmt(d.dta.passRate, 2)}%`,
+      lines: [
+        ['評価点数', d.dta.evaluated.toLocaleString()],
+        ['平均 / 中央値', `${fmt(d.dta.mean, 2)} / ${fmt(d.dta.median, 2)} mm`],
+        ['未検出', `${d.dta.notFound.toLocaleString()} 点`],
+        ['', ''],
+      ],
+    },
+  ];
+  boxes.forEach((b, i) => {
+    const x = M + i * (boxW + 4);
+    doc.setDrawColor(215);
+    doc.setFillColor(248, 248, 246);
+    doc.roundedRect(x, y, boxW, 38, 1.5, 1.5, 'FD');
+    ink(80);
+    text(b.title, x + 3, y + 2.5, 8.5, 'bold');
+    ink(10);
+    text(b.big, x + 3, y + 7, 17, 'bold');
+    b.lines.forEach(([k, v], li) => {
+      if (!k) return;
+      ink(100);
+      text(k, x + 3, y + 17 + li * 4.6, 7.5);
+      ink(20);
+      text(v, x + boxW - 3, y + 17 + li * 4.6, 7.5, 'normal', { align: 'right' });
+    });
+  });
+  y += 42;
+
+  // ヒストグラム
+  y = heading('ヒストグラム', y + 1);
+  const specs = histSpecs(r, d, input.ddUnit);
+  const chartW = (CW - 8) / 3;
+  const chartH = chartW * 0.72;
+  specs.forEach((s, i) => {
+    const c = document.createElement('canvas');
+    const pw = 380;
+    const ph = Math.round(pw * 0.72);
+    c.width = pw * 2;
+    c.height = ph * 2;
+    const ctx = c.getContext('2d')!;
+    ctx.scale(2, 2);
+    drawHistogram(ctx, pw, ph, s, LIGHT_CHART_THEME);
+    doc.addImage(c.toDataURL('image/png'), 'PNG', M + i * (chartW + 4), y, chartW, chartH);
+  });
+  y += chartH + 3;
+
+  if (input.warnings.length) {
+    y = heading('注意事項', y + 2);
+    doc.setTextColor(150, 90, 0);
+    const lines = doc.setFont(FONT, 'normal').setFontSize(8).splitTextToSize(input.warnings.map((w) => `・${w}`).join('\n'), CW) as string[];
+    doc.text(lines.slice(0, 12), M, y, { baseline: 'top' });
+  }
+
+  // ───── 2 ページ目: 断面画像 ─────
+  doc.addPage();
+  const [cx, cy, cz] = [0, 1, 2].map((a) => r.ref.origin[a] + input.cursor[a] * r.ref.spacing[a]);
+  y = heading(`断面画像 (x = ${cx.toFixed(1)}, y = ${cy.toFixed(1)}, z = ${cz.toFixed(1)} mm)`, 13);
+  const doseMap = doseColorMap(input.displayMax);
+  const gMap = gammaColorMap(p.gammaCap);
+  const bg: [number, number, number] = [10, 10, 10];
+  const labelW = 16;
+  const imgW = (CW - labelW - 6) / 3;
+  const cols: { title: string; values: ArrayLike<number>; cmap: ColorMap }[] = [
+    { title: '比較元 (Ref)', values: r.ref.data, cmap: doseMap },
+    { title: '比較先 (Eval)', values: r.evalOnRef, cmap: doseMap },
+    { title: 'ガンマ', values: r.gamma, cmap: gMap },
+  ];
+  cols.forEach((c, i) => {
+    ink(40);
+    text(c.title, M + labelW + i * (imgW + 3) + imgW / 2, y, 9, 'bold', { align: 'center' });
+  });
+  y += 6;
+  const planes: Plane[] = ['axial', 'sagittal', 'coronal'];
+  // 3 断面の高さ合計がページに収まるよう、行ごとの最大高さを決める
+  const maxRowH = 62;
+  for (const plane of planes) {
+    const g = PLANES[plane];
+    const physW = r.ref.dims[g.u] * r.ref.spacing[g.u];
+    const physH = r.ref.dims[g.v] * r.ref.spacing[g.v];
+    const h = Math.min(maxRowH, (imgW * physH) / physW);
+    const w = (h * physW) / physH;
+    ink(40);
+    text(g.label, M, y + h / 2 - 2, 9, 'bold');
+    cols.forEach((c, i) => {
+      const img = renderSlice(r.ref, c.values, plane, input.cursor, c.cmap, bg);
+      const canvas = document.createElement('canvas');
+      const scale = 4;
+      canvas.width = Math.round(w * scale * 2);
+      canvas.height = Math.round(h * scale * 2);
+      const ctx = canvas.getContext('2d')!;
+      drawSlice(ctx, img, canvas.width, canvas.height, voxelToImage(plane, r.ref, input.cursor), 'rgba(255,255,255,0.6)');
+      const x = M + labelW + i * (imgW + 3) + (imgW - w) / 2;
+      doc.addImage(canvas.toDataURL('image/png'), 'PNG', x, y, w, h);
+    });
+    y += h + 4;
+  }
+
+  // カラーバー
+  [doseMap, doseMap, gMap].forEach((cm, i) => {
+    const x = M + labelW + i * (imgW + 3);
+    doc.addImage(colorbarPng(cm), 'PNG', x, y, imgW, 2.5);
+    ink(90);
+    for (const t of cm.ticks) {
+      const tx = x + ((t.value - cm.min) / (cm.max - cm.min)) * imgW;
+      const align = t.value === cm.min ? 'left' : t.value === cm.max ? 'right' : 'center';
+      text(t.label, tx, y + 3.3, 7, 'normal', { align });
+    }
+  });
+  y += 12;
+
+  // コメント・確認者
+  y = heading('コメント・確認', Math.max(y, 222));
+  doc.setDrawColor(200);
+  doc.rect(M, y, CW, 26);
+  if (input.comment) {
+    ink(20);
+    const lines = doc.setFont(FONT, 'normal').setFontSize(9).splitTextToSize(input.comment, CW - 4) as string[];
+    doc.text(lines.slice(0, 5), M + 2, y + 2, { baseline: 'top' });
+  }
+  y += 31;
+  ink(40);
+  text('確認者', M, y, 9);
+  doc.line(M + 14, y + 5, M + 90, y + 5);
+  if (input.reviewer) text(input.reviewer, M + 16, y, 10);
+  text('確認日', M + 100, y, 9);
+  doc.line(M + 114, y + 5, W - M, y + 5);
+
+  // フッター
+  const pages = doc.getNumberOfPages();
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i);
+    ink(140);
+    text(`Gamma3D v${input.version}`, M, 288, 7.5);
+    text(`${i} / ${pages}`, W - M, 288, 7.5, 'normal', { align: 'right' });
+  }
+
+  return doc.output('blob');
+}
+
+export function reportFileName(input: Pick<ReportInput, 'includePatient' | 'ref'>): string {
+  const d = new Date();
+  const ts = `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}`;
+  const id = input.includePatient && input.ref.set.patientId ? `_${input.ref.set.patientId.replace(/[^\w.-]+/g, '_')}` : '';
+  return `gamma3d${id}_${ts}.pdf`;
+}
