@@ -119,6 +119,8 @@ export interface RangeGrid {
   nb: [number, number, number];
   min: Float32Array;
   max: Float32Array;
+  /** ブロック内の比較先線量の勾配の大きさの上限 (Gy/mm)。三線形補間の偏微分は各軸の差分で抑えられる */
+  lip: Float32Array;
 }
 
 const BLOCK = 4;
@@ -129,6 +131,13 @@ export function buildRangeGrid(v: Volume): RangeGrid {
   const size = nb[0] * nb[1] * nb[2];
   const min = new Float32Array(size).fill(Infinity);
   const max = new Float32Array(size).fill(-Infinity);
+  // 各軸の差分の最大値 (セルの始点がブロック内にあるもの)
+  const gx = new Float64Array(size);
+  const gy = new Float64Array(size);
+  const gz = new Float64Array(size);
+  const d = v.data;
+  const [sx, sy, sz] = v.spacing;
+  const sxy = nx * ny;
   let n = 0;
   for (let k = 0; k < nz; k++) {
     const bk = ((k / BLOCK) | 0) * nb[0] * nb[1];
@@ -136,13 +145,19 @@ export function buildRangeGrid(v: Volume): RangeGrid {
       const bj = bk + ((j / BLOCK) | 0) * nb[0];
       for (let i = 0; i < nx; i++, n++) {
         const b = bj + ((i / BLOCK) | 0);
-        const d = v.data[n];
-        if (d < min[b]) min[b] = d;
-        if (d > max[b]) max[b] = d;
+        const c = d[n];
+        if (c < min[b]) min[b] = c;
+        if (c > max[b]) max[b] = c;
+        if (i + 1 < nx) gx[b] = Math.max(gx[b], Math.abs(d[n + 1] - c) / sx);
+        if (j + 1 < ny) gy[b] = Math.max(gy[b], Math.abs(d[n + nx] - c) / sy);
+        if (k + 1 < nz) gz[b] = Math.max(gz[b], Math.abs(d[n + sxy] - c) / sz);
       }
     }
   }
-  return { nb, min, max };
+  const lip = new Float32Array(size);
+  // 丸め誤差で下限が過大にならないよう、わずかに大きめにする
+  for (let b = 0; b < size; b++) lip[b] = Math.sqrt(gx[b] * gx[b] + gy[b] * gy[b] + gz[b] * gz[b]) * (1 + 1e-6);
+  return { nb, min, max, lip };
 }
 
 /** スライス範囲 [k0, k1) の解析結果。各配列は比較元グリッドのボクセルに対応する。 */
@@ -223,6 +238,7 @@ export function computeSlab(
   const [nbx, nby] = evalRange.nb;
   const rmin = evalRange.min;
   const rmax = evalRange.max;
+  const rlip = evalRange.lip;
   const blockOf = (pos: number, o: number, sp: number, len: number, dir: number): number => {
     const f = (pos - o) / sp;
     const v = dir < 0 ? Math.floor(f) : Math.ceil(f);
@@ -260,6 +276,7 @@ export function computeSlab(
         // 探索球内で比較先が取りうる線量範囲 [emin, emax]
         let emin = Infinity;
         let emax = -Infinity;
+        let lip = 0;
         const bi0 = blockOf(x - radius, eox, esx, enx, -1);
         const bi1 = blockOf(x + radius, eox, esx, enx, 1);
         const bj0 = blockOf(y - radius, eoy, esy, eny, -1);
@@ -272,6 +289,7 @@ export function computeSlab(
             for (let bi = bi0; bi <= bi1; bi++, b++) {
               if (rmin[b] < emin) emin = rmin[b];
               if (rmax[b] > emax) emax = rmax[b];
+              if (rlip[b] > lip) lip = rlip[b];
             }
           }
         }
@@ -281,8 +299,17 @@ export function computeSlab(
         // ガンマ
         const deltaD = p.local ? localFrac * dr : globalDD;
         const invD2 = 1 / (deltaD * deltaD);
-        // どの探索点でも線量項はこの値以上になる
-        const floor2 = gap * gap * invD2;
+        // 探索点の線量項の下限。比較先の線量は、範囲 [emin, emax] に収まり、中心から距離 r では
+        // |比較先 − 中心の比較先| ≤ lip × r なので、|比較先 − 比較元| ≥ max(gap, T − lip·r) (T = |中心での差|)。
+        // 距離 r (DTA 単位) の点のガンマ² の下限 f(r) = r² + max(gap, T − L·r, 0)² / ΔD² は凸なので、
+        // 最小点 rOpt を先に求めておき、半径 R 以遠の下限は f(max(R, rOpt)) で得る。
+        const T = Math.abs(de0 - dr);
+        const L = lip * dtaMm;
+        let rOpt = 0;
+        if (L > 0) {
+          const r0 = (invD2 * L * T) / (1 + invD2 * L * L);
+          rOpt = T - L * r0 >= gap ? r0 : Math.max(0, (T - gap) / L);
+        }
         let best = (de0 - dr) * (de0 - dr) * invD2;
         let bx = 0;
         let by = 0;
@@ -298,8 +325,13 @@ export function computeSlab(
           // 探索半径ちょうどの点も調べる (真値が上限のわずかに手前の点を上限と誤らないため)
           if (r2 > cap2) break;
           // 未探索の格子点と探索済みの点を結ぶ辺上の交点は、現在の半径より最大 1 刻み内側にありうる
-          const inner = offRn[m] - margin;
-          if ((inner > 0 ? inner * inner : 0) + floor2 >= best) break;
+          // 最良値を下回れないか、上限付近 (詰めの対象) まで下がる見込みがなければ打ち切る。
+          // 上限以上の値はどれも「≥ 上限」になるので、それ以上探しても出力は変わらない
+          let rr = offRn[m] - margin;
+          if (rr < rOpt) rr = rOpt;
+          let u = T - L * rr;
+          if (u < gap) u = gap;
+          if (rr * rr + u * u * invD2 >= (best < refineLimit ? best : refineLimit)) break;
           const ox_ = offX[m];
           const oy_ = offY[m];
           const oz_ = offZ[m];
@@ -394,12 +426,13 @@ export function computeSlab(
           const s0 = de0 - dr;
           if (s0 === 0) {
             dta[out] = 0;
-          } else if (gap > 0) {
-            // 探索範囲内に比較元と同じ線量の点がない
+          } else if (gap > 0 || L === 0 || T / L > p.gammaCap) {
+            // 探索範囲内に比較元と同じ線量の点がない (範囲外、または勾配の上限から届かない)
             dta[out] = Infinity;
           } else {
             let found = Infinity;
-            for (let m = 1; m < nOff; m++) {
+            // 等線量面は中心から T / L (DTA 単位) より内側にはない
+            for (let m = firstAtLeast(offRn, T / L); m < nOff; m++) {
               const de = sample(x + offX[m], y + offY[m], z + offZ[m]);
               if (de !== de) continue;
               const s = de - dr;
@@ -418,6 +451,18 @@ export function computeSlab(
   }
 
   return { k0, k1, gamma, dd, dta, grad, evalOnRef };
+}
+
+/** 昇順の配列 a で、a[m] >= v となる最初の m (1 以上) */
+function firstAtLeast(a: Float32Array, v: number): number {
+  let lo = 1;
+  let hi = a.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (a[mid] < v) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }
 
 /** 局所詰めの段数 (刻み/2, /4, /8)。比較先の格子の端では /128 まで */
