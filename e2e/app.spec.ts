@@ -302,3 +302,81 @@ test('RTPLAN がなければプランの表示と換算ボタンは出ない', a
   await expect(page.locator('[data-side="ref"] .plan-info')).toBeHidden();
   await expect(page.locator('[data-side="ref"] .per-fraction')).toBeHidden();
 });
+
+/** 画面上の日本語 (言語の選択肢 "日本語" を除く、非表示の要素や title などの属性も含む) */
+const japaneseOnPage = (page: Page) =>
+  page.evaluate(() => {
+    const jp = /[぀-ヿ㐀-鿿]+/g;
+    const body = document.body.cloneNode(true) as HTMLElement;
+    body.querySelector('#lang')?.remove();
+    const attrs = [...body.querySelectorAll('*')].flatMap((el) =>
+      ['title', 'aria-label', 'placeholder', 'label'].map((a) => el.getAttribute(a) ?? ''),
+    );
+    return [body.textContent ?? '', ...attrs, document.title].join('\n').match(jp) ?? [];
+  });
+
+test('ブラウザの言語が英語なら英語の画面になり、日本語の文字列が残らない', async ({ browser }) => {
+  const context = await browser.newContext({ locale: 'en-US' });
+  const page = await context.newPage();
+  await load(page);
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.locator('#lang')).toHaveValue('en');
+  await expect(page.locator('#run')).toHaveText('Run analysis');
+  await page.click('#run');
+  await expect(page.locator('#run-status')).toContainText('Done', { timeout: 30_000 });
+  await expect(page.locator('.stat .label').first()).toContainText('Gamma passing rate');
+  await expect(page.locator('.judgment strong').first()).toHaveText(/^(Pass|Review|Fail)$/);
+  expect(await japaneseOnPage(page)).toEqual([]);
+  await context.close();
+});
+
+test('言語を切り替えると、読み込み済みのデータと解析結果を保ったまま文言が変わり、選択は保存される', async ({ page }) => {
+  await load(page);
+  await analyze(page);
+  const passRate = await page.locator('.stat .value').first().textContent();
+  await expect(page.locator('[data-side="eval"] .set-select')).toContainText('BEAM 合算 ×2');
+
+  await page.selectOption('#lang', 'en');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.locator('#run-status')).toContainText('Done');
+  await expect(page.locator('[data-side="eval"] .set-select')).toContainText('BEAM sum ×2');
+  await expect(page.locator('#panel-ref .panel-head')).toContainText('Reference (Ref)');
+  await expect(page.locator('.stat .value').first()).toHaveText(passRate!);
+  expect(await japaneseOnPage(page)).toEqual([]);
+
+  // 日本語に戻すと元の文言になる
+  await page.selectOption('#lang', 'ja');
+  await expect(page.locator('#run-status')).toContainText('完了');
+  await expect(page.locator('#panel-ref .panel-head')).toContainText('比較元 (Ref)');
+
+  // 選択は再読み込み後も残る (ブラウザの言語設定より優先)
+  await page.selectOption('#lang', 'en');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.locator('#lang')).toHaveValue('en');
+});
+
+test('英語の PDF は小さい英字用フォントで作り、データに日本語があれば日本語フォントを使う', async ({ page }) => {
+  const fonts: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('/fonts/')) fonts.push(r.url().split('/').pop()!);
+  });
+  await page.goto('/?lang=en');
+  await page.locator('[data-side="ref"] .file-input').setInputFiles(REF);
+  await page.locator('[data-side="eval"] .file-input').setInputFiles(EVAL);
+  await page.click('#run');
+  await expect(page.locator('#run-status')).toContainText('Done', { timeout: 30_000 });
+
+  await page.fill('#r-reviewer', 'John Smith');
+  const [download] = await Promise.all([page.waitForEvent('download', { timeout: 60_000 }), page.click('#pdf')]);
+  const bytes = readFileSync((await download.path())!);
+  expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
+  expect(fonts.sort()).toEqual(['NotoSansJP-Latin-Bold.ttf', 'NotoSansJP-Latin-Regular.ttf']);
+  await expect(page.locator('#pdf-status')).toContainText('Saved');
+
+  // 確認者の名前が日本語なら、英語の画面でも日本語フォントを読み込む
+  fonts.length = 0;
+  await page.fill('#r-reviewer', '確認 太郎');
+  await Promise.all([page.waitForEvent('download', { timeout: 60_000 }), page.click('#pdf')]);
+  expect(fonts.sort()).toEqual(['NotoSansJP-Bold.ttf', 'NotoSansJP-Regular.ttf']);
+});

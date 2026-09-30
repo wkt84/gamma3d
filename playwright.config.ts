@@ -14,8 +14,10 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     trace: 'retain-on-failure',
     viewport: { width: 1600, height: 1000 },
+    // 画面の言語はブラウザの言語設定で決まる。既存のテストは日本語の画面で確かめる
+    locale: 'ja-JP',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1600, height: 1000 } } }],
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1600, height: 1000 }, locale: 'ja-JP' } }],
   webServer: {
     command: `npm run gen:samples && npx vite build && npx vite preview --port ${PORT} --strictPort`,
     url: `http://localhost:${PORT}`,

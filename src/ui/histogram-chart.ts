@@ -66,7 +66,7 @@ export interface BarHit {
   percent: number;
 }
 
-const PAD = { l: 44, r: 12, t: 40, b: 38 };
+const BASE_PAD = { l: 44, r: 12, t: 40, b: 38 };
 
 /** 目盛り間隔を 1, 2, 2.5, 5 ×10^k から選び、4 目盛り前後になる上限と間隔を返す */
 function niceAxis(v: number): { max: number; step: number } {
@@ -87,29 +87,43 @@ export function drawHistogram(ctx: CanvasRenderingContext2D, w: number, h: numbe
   ctx.fillRect(0, 0, w, h);
   const font = (size: number, weight = 400) => `${weight} ${size}px ${t.font}`;
 
-  // タイトルと要約
+  // 見出し: タイトル・要約・凡例。幅が足りなければ要約を凡例の行へ、それでも足りなければ独立した行へ回す
+  const legend: [string, string][] = [
+    [t.pass, m().hist.pass],
+    [t.fail, m().hist.fail],
+  ];
+  ctx.font = font(13, 600);
+  const titleW = ctx.measureText(spec.title).width;
+  ctx.font = font(12, 500);
+  const summaryW = ctx.measureText(spec.summary).width;
+  ctx.font = font(11);
+  const legendW = legend.reduce((a, [, label]) => a + 13 + ctx.measureText(label).width + 12, 0);
+  const room = w - 20 - 16;
+  const summaryRow = titleW + summaryW <= room ? 0 : legendW + summaryW <= room ? 1 : 2;
+  const legendY = summaryRow === 2 ? 40 : 24;
+  const PAD = { ...BASE_PAD, t: BASE_PAD.t + (summaryRow === 2 ? 16 : 0) };
+
   ctx.fillStyle = t.ink;
   ctx.font = font(13, 600);
   ctx.textBaseline = 'top';
   ctx.textAlign = 'left';
   ctx.fillText(spec.title, 10, 8);
-  ctx.textAlign = 'right';
   ctx.fillStyle = t.inkSecondary;
   ctx.font = font(12, 500);
-  ctx.fillText(spec.summary, w - 10, 8);
+  if (summaryRow === 2) ctx.fillText(spec.summary, 10, 24);
+  else {
+    ctx.textAlign = 'right';
+    ctx.fillText(spec.summary, w - 10, summaryRow === 0 ? 8 : 24);
+  }
 
-  // 凡例
   ctx.font = font(11);
   ctx.textAlign = 'left';
   let lx = 10;
-  for (const [color, label] of [
-    [t.pass, m().hist.pass],
-    [t.fail, m().hist.fail],
-  ]) {
+  for (const [color, label] of legend) {
     ctx.fillStyle = color;
-    ctx.fillRect(lx, 25, 9, 9);
+    ctx.fillRect(lx, legendY + 1, 9, 9);
     ctx.fillStyle = t.inkSecondary;
-    ctx.fillText(label, lx + 13, 24);
+    ctx.fillText(label, lx + 13, legendY);
     lx += 13 + ctx.measureText(label).width + 12;
   }
 
@@ -184,28 +198,38 @@ export function drawHistogram(ctx: CanvasRenderingContext2D, w: number, h: numbe
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   ctx.font = font(10);
+  // 範囲外バーのラベルは、はみ出さないように内側へ寄せる。占めた範囲には X 目盛りを描かない
+  const taken: [number, number][] = [];
+  const edgeLabel = (label: string, center: number) => {
+    const lw = ctx.measureText(label).width;
+    const x = Math.min(w - 2 - lw / 2, Math.max(2 + lw / 2, center));
+    ctx.fillStyle = t.muted;
+    ctx.fillText(label, x, PAD.t + plotH + 6);
+    taken.push([x - lw / 2 - 4, x + lw / 2 + 4]);
+  };
   if (hasUnder) {
     const x = PAD.l;
     bar(x + gap / 2, slot - gap, pct(hist.underflow), false, hits.length);
     hits.push({ x, w: slot, label: spec.underflowLabel!, count: hist.underflow, percent: pct(hist.underflow) });
-    ctx.fillStyle = t.muted;
-    ctx.fillText(spec.underflowLabel!, x + slot / 2, PAD.t + plotH + 6);
+    edgeLabel(spec.underflowLabel!, x + slot / 2);
   }
   if (hasOver) {
     const x = w - PAD.r - slot;
     bar(x + gap / 2, slot - gap, pct(hist.overflow), spec.overflowPass ?? false, hits.length);
     hits.push({ x, w: slot, label: spec.overflowLabel!, count: hist.overflow, percent: pct(hist.overflow) });
-    ctx.fillStyle = t.muted;
-    ctx.fillText(spec.overflowLabel!, x + slot / 2, PAD.t + plotH + 6);
+    edgeLabel(spec.overflowLabel!, x + slot / 2);
   }
 
-  // X 目盛り (範囲外バーのラベルと重なる端の目盛りは省く)
+  // X 目盛り (範囲外バーの境界の目盛りと、範囲外バーのラベルに重なるものは省く)
   ctx.fillStyle = t.muted;
   const lastEdge = hist.min + nb * hist.binWidth;
   for (const v of spec.ticks) {
     if ((hasUnder && Math.abs(v - hist.min) < 1e-9) || (hasOver && Math.abs(v - lastEdge) < 1e-9)) continue;
     const x = xOf(v);
-    ctx.fillText(spec.fmtX(v), x, PAD.t + plotH + 6);
+    const label = spec.fmtX(v);
+    const half = ctx.measureText(label).width / 2;
+    if (taken.some(([a, b]) => x + half > a && x - half < b)) continue;
+    ctx.fillText(label, x, PAD.t + plotH + 6);
   }
   ctx.fillStyle = t.inkSecondary;
   ctx.fillText(spec.xLabel, bodyX + (nb * slot) / 2, PAD.t + plotH + 21);

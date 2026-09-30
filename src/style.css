@@ -87,6 +87,17 @@ body {
   color: var(--text-muted);
 }
 
+.header-end {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+/* 英語などでは見出し自体が英語なので、併記している英語のタグは出さない */
+:root:not(:lang(ja)) .card h2 .tag {
+  display: none;
+}
+
 .layout {
   flex: 1;
   display: grid;

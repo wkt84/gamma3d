@@ -9,6 +9,7 @@
 - BEAM 線量は参照プランごとに自動で合算する (PLAN 線量と並んでいる場合は選択可)
 - 結果は Axial / Sagittal / Coronal の断面表示と、DD・DTA・γ のヒストグラムで確認する
 - PDF レポートを出力する (Noto Sans JP を埋め込み、日本語に対応)
+- 画面と PDF は日本語と英語に対応する (右上で切り替え。初回はブラウザの言語設定に合わせる)
 
 ## 使い方
 
@@ -80,10 +81,11 @@ src/
   wasm/      gamma3d_kernel.wasm (wasm/ からビルドしたもの。コミットする)
   ui/        断面描画・カラーマップ・ヒストグラム・パネル部品
   report/    pdf.ts (jsPDF。フォントは PDF 出力時に遅延読み込み)
-  i18n/      ja.ts (UI と PDF の文言の辞書)、index.ts (辞書の切り替えと、HTML の data-i18n 属性への適用)
+  i18n/      ja.ts・en.ts (UI と PDF の文言の辞書)、index.ts (言語の選択・切り替えと、HTML の data-i18n 属性への適用)
 wasm/        Rust のガンマ探索カーネル (Cargo、rust-toolchain.toml)
-scripts/     dicom-writer.ts (テスト・サンプル用の RTDOSE 書き出し), gen-samples.ts
-public/fonts Noto Sans JP (SIL Open Font License、OFL.txt 同梱)
+scripts/     dicom-writer.ts (テスト・サンプル用の RTDOSE 書き出し), gen-samples.ts,
+             subset-fonts.sh (英語 PDF 用の英字フォントを作る)
+public/fonts Noto Sans JP と、そこから英字・記号だけを取り出した NotoSansJP-Latin (SIL Open Font License、OFL.txt 同梱)
 ```
 
 ## デプロイ (Vercel)

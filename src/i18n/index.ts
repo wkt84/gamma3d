@@ -1,16 +1,55 @@
+import { en } from './en.ts';
 import { ja, type Messages } from './ja.ts';
 
 export type { Messages };
 
+/** 対応言語 (選択肢の表示名は各言語での自称) */
+export const LANGUAGES = { ja: { messages: ja, name: '日本語' }, en: { messages: en, name: 'English' } } as const;
+export type Lang = keyof typeof LANGUAGES;
+
+const isLang = (v: unknown): v is Lang => typeof v === 'string' && Object.hasOwn(LANGUAGES, v);
+
 let current: Messages = ja;
+const listeners: (() => void)[] = [];
 
 /** 現在の言語の辞書 */
 export function m(): Messages {
   return current;
 }
 
+export function currentLang(): Lang {
+  return current.lang as Lang;
+}
+
 export function setMessages(messages: Messages): void {
   current = messages;
+}
+
+/** 言語を切り替え、登録された再描画を呼ぶ */
+export function setLang(lang: Lang): void {
+  if (lang === currentLang()) return;
+  current = LANGUAGES[lang].messages;
+  listeners.forEach((f) => f());
+}
+
+/** 言語が切り替わったときに呼ぶ処理を登録する */
+export function onLangChange(f: () => void): void {
+  listeners.push(f);
+}
+
+/**
+ * 最初に使う言語: URL の ?lang=、保存した選択、ブラウザの言語設定の順に決める。
+ * どれにも対応言語がなければ英語 (日本語はブラウザが日本語を優先している場合に選ばれる)。
+ */
+export function initialLang(search: string, saved: string | null, preferred: readonly string[]): Lang {
+  const q = new URLSearchParams(search).get('lang');
+  if (isLang(q)) return q;
+  if (isLang(saved)) return saved;
+  for (const tag of preferred) {
+    const base = tag.toLowerCase().split('-')[0];
+    if (isLang(base)) return base;
+  }
+  return 'en';
 }
 
 /**
