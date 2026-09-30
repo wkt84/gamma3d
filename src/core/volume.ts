@@ -123,3 +123,12 @@ export function resampleTo(src: Volume, target: Pick<Volume, 'dims' | 'spacing' 
   }
   return { dims: [...target.dims], spacing: [...target.spacing], origin: [...target.origin], data: out };
 }
+
+/**
+ * 体積を shift (mm) だけ平行移動したものを返す (データは共有し、原点だけをずらす)。
+ * 移動後の位置 x の値は、移動前の位置 x − shift の値になる。
+ */
+export function shiftVolume(v: Volume, shift: Vec3): Volume {
+  if (shift[0] === 0 && shift[1] === 0 && shift[2] === 0) return v;
+  return { ...v, origin: [v.origin[0] + shift[0], v.origin[1] + shift[1], v.origin[2] + shift[2]] };
+}

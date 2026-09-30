@@ -5,6 +5,7 @@ import { doseColorMap, gammaColorMap, type ColorMap } from '../ui/colormap.ts';
 import { drawHistogram, LIGHT_CHART_THEME } from '../ui/histogram-chart.ts';
 import { histSpecs, type DdUnit, type Derived } from '../ui/results.ts';
 import { drawSlice, PLANES, renderSlice, voxelToImage, type Ijk, type Plane } from '../ui/slice.ts';
+import type { Vec3 } from '../core/volume.ts';
 import { m, text as msgText, type Msg } from '../i18n/index.ts';
 
 export interface ReportSide {
@@ -20,6 +21,8 @@ export interface ReportInput {
   ref: ReportSide;
   ev: ReportSide;
   displayMax: number;
+  /** 比較先の平行移動 (mm) */
+  shift: Vec3;
   warnings: Msg[];
   cursor: Ijk;
   includePatient: boolean;
@@ -137,6 +140,8 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
   const side = (s: ReportSide) =>
     t.side(msgText(s.set.label), s.set.doses.length, msgText(s.set.summary), scaleFactor(s.scale) !== 1 ? formatScale(s.scale) : null);
   const sameFor = input.ref.set.frameOfReferenceUID === input.ev.set.frameOfReferenceUID;
+  const shifted = input.shift.some((v) => v !== 0);
+  const [sx, sy, sz] = input.shift.map((v) => (v > 0 ? `+${v}` : `${v}`));
   const patient = input.includePatient
     ? t.patientValue(input.ref.set.patientName || m().side.noName, input.ref.set.patientId || '–')
     : t.hidden;
@@ -145,7 +150,7 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
       [t.patient, patient],
       [t.ref, side(input.ref)],
       [t.eval, side(input.ev)],
-      [t.frame, sameFor ? t.frameSame : t.frameDifferent],
+      [t.frame, sameFor ? t.frameSame : shifted ? t.frameDifferentShifted : t.frameDifferent],
     ],
     y,
   );
@@ -164,6 +169,7 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
       [t.step, t.stepValue((p.dtaMm / p.stepsPerDta).toFixed(2))],
       [t.grid, t.gridValue(`${nx}×${ny}×${nz}`)],
       [t.evalInterp, t.evalInterpValue],
+      [t.shift, shifted ? t.shiftValue(sx, sy, sz) : t.noShift],
     ],
     y,
     2,

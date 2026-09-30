@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildSearchOffsets, computeSlab, DEFAULT_PARAMS, type AnalysisParams } from '../src/core/gamma.ts';
 import { ddPercentArray, ddStats, dtaStats, gammaHistogram, gammaStats } from '../src/core/stats.ts';
-import { createSampler, resampleTo, type Volume } from '../src/core/volume.ts';
+import { createSampler, resampleTo, shiftVolume, type Vec3, type Volume } from '../src/core/volume.ts';
 
 function makeVolume(dims: [number, number, number], spacing: [number, number, number], origin: [number, number, number], f: (x: number, y: number, z: number) => number): Volume {
   const [nx, ny, nz] = dims;
@@ -120,6 +120,33 @@ describe('gamma', () => {
     expect(on.dd[c + 5]).toBeNaN(); // 5%/mm の勾配部は除外
     const off = run(ref, ev).r;
     expect(off.dd[c + 5]).toBeCloseTo(0.01, 5);
+  });
+});
+
+describe('手動シフト (A1)', () => {
+  it('shiftVolume は原点だけをずらし、移動後の位置 x の値は移動前の x − shift の値になる', () => {
+    const v = makeVolume(grid.dims, grid.spacing, grid.origin, (x, y, z) => x + 2 * y + 3 * z);
+    const moved = shiftVolume(v, [1, -2, 0.5]);
+    expect(moved.data).toBe(v.data);
+    expect(createSampler(moved)(3, 4, 5)).toBeCloseTo(2 + 2 * 6 + 3 * 4.5, 5);
+    expect(shiftVolume(v, [0, 0, 0])).toBe(v);
+  });
+
+  it('既知量だけずらした比較先を、逆向きに平行移動するとパス率 100% に戻る', () => {
+    const s: Vec3 = [2, -1.5, 1];
+    const f = (x: number, y: number, z: number) => 2 * Math.exp(-(x * x + y * y + z * z) / (2 * 5 * 5));
+    const ref = makeVolume(grid.dims, grid.spacing, grid.origin, f);
+    const ev = makeVolume(grid.dims, grid.spacing, grid.origin, (x, y, z) => f(x - s[0], y - s[1], z - s[2]));
+    const crit = { ddPercent: 2, dtaMm: 1 };
+
+    const before = gammaStats(run(ref, ev, crit).r.gamma, 2);
+    expect(before.passRate).toBeLessThan(50);
+
+    const corrected = shiftVolume(ev, [-s[0], -s[1], -s[2]]);
+    const after = gammaStats(run(ref, corrected, crit).r.gamma, 2);
+    expect(after.evaluated).toBeGreaterThan(500);
+    expect(after.passRate).toBe(100);
+    expect(after.max).toBeLessThan(0.3);
   });
 });
 
