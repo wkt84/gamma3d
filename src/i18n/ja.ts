@@ -96,7 +96,9 @@ export const ja = {
 
   run: {
     running: '計算中…',
-    done: (seconds: S, workers: N, shared: boolean) => `完了: ${seconds} 秒 (${workers} スレッド${shared ? '' : '、共有メモリなし'})`,
+    done: (seconds: S, workers: N, shared: boolean, engine: S) =>
+      `完了: ${seconds} 秒 (${workers} スレッド、${engine}${shared ? '' : '、共有メモリなし'})`,
+    engine: { wasm: 'WebAssembly', ts: 'TypeScript', mixed: 'WebAssembly / TypeScript 混在' },
     cancelled: '中止しました',
     error: (message: S) => `エラー: ${message}`,
     stale: '解析条件が変更されています。再解析してください。',

@@ -8,3 +8,4 @@ playwright-report/
 test-results/
 validation/.work/
 __pycache__/
+wasm/target/

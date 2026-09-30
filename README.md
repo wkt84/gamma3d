@@ -57,7 +57,16 @@ npm run preview       # ビルド結果の確認
 
 GitHub Actions (`.github/workflows/ci.yml`) で、push と PR のたびに型チェック・単体テスト・ビルド・E2E テストを実行します。
 
-計算は Web Worker のプールで、スライス単位に並列実行します。COOP/COEP ヘッダー (`vite.config.ts` / `vercel.json`) で `crossOriginIsolated` にしてあり、線量配列は SharedArrayBuffer で Worker 間で共有します。
+計算は Web Worker のプールで、スライス単位に並列実行します。Worker の数は、ブラウザが報告する論理コア数 (最大 16) です。COOP/COEP ヘッダー (`vite.config.ts` / `vercel.json`) で `crossOriginIsolated` にしてあり、線量配列は SharedArrayBuffer で Worker 間で共有します。
+
+### ガンマ探索カーネル (WebAssembly)
+
+ガンマ探索の本体は、Rust で書いた WebAssembly (`wasm/src/lib.rs`) で実行します。TypeScript 版 (`src/core/gamma.ts` の `computeSlab`) と同じ計算で、結果はビット単位で一致します (`test/wasm.test.ts`)。速度は TypeScript 版の約 2 倍です。
+
+- ビルド済みの `src/wasm/gamma3d_kernel.wasm` をコミットしているので、アプリのビルドに Rust は不要です。
+- `wasm/` を変更したときは、`npm run build:wasm` で作り直してコミットします。ツールチェーンは `wasm/rust-toolchain.toml` で固定していて、CI でソースから再ビルドしたものと一致するかを確かめます。
+- wasm を読み込めない環境では、自動で TypeScript 版で計算します。URL に `?engine=ts` を付けると、TypeScript 版に固定できます (切り分け用)。解析完了の表示に、どちらで計算したかが出ます。
+- 計算内容を変えるときは、TypeScript 版と Rust 版の両方を直し、`npm test` で一致を、`npm run validate` で精度を確かめます。
 
 ### 構成
 
@@ -65,10 +74,12 @@ GitHub Actions (`.github/workflows/ci.yml`) で、push と PR のたびに型チ
 src/
   core/      volume.ts (格子・補間), gamma.ts (ガンマ/DD/DTA の計算), stats.ts, runner.ts (Worker プール)
   dicom/     rtdose.ts (RTDOSE の読み込みと座標の正規化), group.ts (プランごとのまとめ・BEAM 合算)
-  worker/    gamma.worker.ts
+  worker/    gamma.worker.ts (wasm を読み込めなければ TypeScript 版で計算)
+  wasm/      gamma3d_kernel.wasm (wasm/ からビルドしたもの。コミットする)
   ui/        断面描画・カラーマップ・ヒストグラム・パネル部品
   report/    pdf.ts (jsPDF。フォントは PDF 出力時に遅延読み込み)
   i18n/      ja.ts (UI と PDF の文言の辞書)、index.ts (辞書の切り替えと、HTML の data-i18n 属性への適用)
+wasm/        Rust のガンマ探索カーネル (Cargo、rust-toolchain.toml)
 scripts/     dicom-writer.ts (テスト・サンプル用の RTDOSE 書き出し), gen-samples.ts
 public/fonts Noto Sans JP (SIL Open Font License、OFL.txt 同梱)
 ```

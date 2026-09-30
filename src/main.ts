@@ -662,7 +662,7 @@ runBtn.addEventListener('click', async () => {
     derived = derive(result);
     stale = false;
     display.evalOnRef = result.evalOnRef;
-    runStatus.textContent = m().run.done((result.elapsedMs / 1000).toFixed(1), result.workers, result.sharedMemory);
+    runStatus.textContent = m().run.done((result.elapsedMs / 1000).toFixed(1), result.workers, result.sharedMemory, m().run.engine[result.engine]);
     renderViews();
     renderCharts();
     renderSummary();

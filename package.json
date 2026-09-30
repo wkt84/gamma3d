@@ -13,7 +13,8 @@
     "test": "vitest run",
     "gen:samples": "node scripts/gen-samples.ts",
     "test:e2e": "playwright test",
-    "validate": "npm run gen:samples && node validation/export.ts && uv run validation/compare.py"
+    "validate": "npm run gen:samples && node validation/export.ts && uv run validation/compare.py",
+    "build:wasm": "cd wasm && cargo build --release --target wasm32-unknown-unknown && cp target/wasm32-unknown-unknown/release/gamma3d_kernel.wasm ../src/wasm/gamma3d_kernel.wasm"
   },
   "engines": {
     "node": "24.x"
