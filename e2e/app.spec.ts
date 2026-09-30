@@ -391,6 +391,18 @@ test('下段をプロファイルに切り替えると x・y・z のプロファ
   for (const a of ['x', 'y', 'z']) await expect(page.locator(`#profile-${a} canvas`)).toBeVisible();
   await expect(page.locator('#profile-x')).toHaveAttribute('aria-label', /^x プロファイル \(y = .+, z = .+ mm\)$/);
 
+  // プロファイル上のホバー位置を断面にも印で示し、値表示もその点になる (外れると戻る)
+  const pixels = () => page.locator('#panel-ref canvas').evaluate((c: HTMLCanvasElement) => c.toDataURL());
+  const plain = await pixels();
+  const readout = await page.locator('#readout').textContent();
+  const px = (await page.locator('#profile-x canvas').boundingBox())!;
+  await page.mouse.move(px.x + px.width * 0.7, px.y + px.height * 0.5);
+  await expect.poll(pixels).not.toBe(plain);
+  await expect(page.locator('#readout')).not.toHaveText(readout!);
+  await page.mouse.move(px.x + px.width * 0.7, px.y - 20);
+  await expect.poll(pixels).toBe(plain);
+  await expect(page.locator('#readout')).toHaveText(readout!);
+
   // Axial 表示では z 方向のプロファイル上の位置がスライスになる
   await expect(sliceLabel(page)).toHaveText(/^32\/64/);
   const box = (await page.locator('#profile-z canvas').boundingBox())!;
