@@ -19,6 +19,7 @@ export const en: Messages = {
     inputPane: 'Input data',
     resultPane: 'Results',
     language: 'Language',
+    github: 'GitHub repository (source code and issues)',
   },
 
   side: {
