@@ -875,10 +875,50 @@ figure {
   padding: 5px 8px;
   font-size: 11px;
   color: var(--text-primary);
-  white-space: nowrap;
+  white-space: pre;
   font-variant-numeric: tabular-nums;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   z-index: 2;
+}
+
+/* ビンを選んだときの情報と移動ボタン (選んだヒストグラムの下端) */
+.selection-bar {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 8px;
+  border-radius: 6px;
+  border: 1px solid #ff00ff;
+  background: var(--surface-2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.selection-bar .swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: #ff00ff;
+}
+
+.selection-bar .text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.selection-bar button {
+  flex: none;
+  font-size: 11px;
+  padding: 1px 7px;
 }
 
 .chart .empty {

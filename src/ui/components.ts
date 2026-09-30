@@ -34,6 +34,7 @@ export class SlicePanel {
   private readonly colorbar: HTMLElement;
   private image: SliceImage | null = null;
   private cross: [number, number] | null = null;
+  private overlay: SliceImage | null = null;
   private wheelAcc = 0;
   private view: SliceView = FULL_VIEW;
   private drag: { x: number; y: number; moved: boolean } | null = null;
@@ -134,9 +135,11 @@ export class SlicePanel {
     this.redraw();
   }
 
-  show(image: SliceImage, cross: [number, number] | null): void {
+  /** overlay: 強調表示の重ね画像 (ヒストグラムのビンを選んだとき) */
+  show(image: SliceImage, cross: [number, number] | null, overlay: SliceImage | null = null): void {
     this.image = image;
     this.cross = cross;
+    this.overlay = overlay;
     this.msg.textContent = '';
     this.redraw();
   }
@@ -175,7 +178,7 @@ export class SlicePanel {
     const c = setupCanvas(this.canvas);
     if (!c) return;
     c.ctx.clearRect(0, 0, c.w, c.h);
-    if (this.image) drawSlice(c.ctx, this.image, c.w, c.h, this.cross, undefined, this.view);
+    if (this.image) drawSlice(c.ctx, this.image, c.w, c.h, this.cross, undefined, this.view, this.overlay);
   }
 
   /** 画像の配置 (キャンバス内の CSS ピクセル) */
@@ -205,6 +208,11 @@ export class HistogramView {
   private hits: BarHit[] = [];
   private hover = -1;
   private readonly fig: HTMLElement;
+  private selected: number | null = null;
+  private selectionBar: HTMLElement | null = null;
+
+  /** バーのクリック: そのビンを選ぶ (選択中のビンなら null で解除) */
+  onSelect: (bin: number | null) => void = () => {};
 
   constructor(fig: HTMLElement, emptyText: string) {
     this.fig = fig;
@@ -221,11 +229,26 @@ export class HistogramView {
       this.tip.hidden = true;
       this.redraw();
     });
+    this.canvas.addEventListener('click', (e) => {
+      const h = this.nearest(e);
+      if (!h || h.count === 0) return;
+      this.tip.hidden = true;
+      this.onSelect(this.selected === h.bin ? null : h.bin);
+    });
     matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => this.redraw());
   }
 
   setEmptyText(t: string): void {
     this.empty.textContent = t;
+  }
+
+  /** 選択中のビンと、その情報を出す帯 (グラフの下端に置く)。選択がなければ null */
+  setSelection(bin: number | null, bar: HTMLElement | null): void {
+    this.selected = bin;
+    if (this.selectionBar && this.selectionBar !== bar && this.selectionBar.parentElement === this.fig) this.selectionBar.remove();
+    this.selectionBar = bar;
+    if (bar && bar.parentElement !== this.fig) this.fig.append(bar);
+    this.redraw();
   }
 
   set(spec: HistSpec | null): void {
@@ -240,23 +263,30 @@ export class HistogramView {
     if (!this.spec) return;
     const c = setupCanvas(this.canvas);
     if (!c) return;
-    this.hits = drawHistogram(c.ctx, c.w, c.h, this.spec, themeFromCss(this.fig), this.hover);
+    const reserve = this.selectionBar ? this.selectionBar.offsetHeight + 6 : 0;
+    this.hits = drawHistogram(c.ctx, c.w, c.h, this.spec, themeFromCss(this.fig), this.hover, this.selected, reserve);
+  }
+
+  /** ポインタに最も近いバー (バーより広い当たり判定)。遠ければ null */
+  private nearest(e: MouseEvent): BarHit | null {
+    const x = e.clientX - this.canvas.getBoundingClientRect().left;
+    let best: BarHit | null = null;
+    let bestD = Infinity;
+    for (const h of this.hits) {
+      const d = Math.abs(h.x + h.w / 2 - x);
+      if (d < bestD) {
+        bestD = d;
+        best = h;
+      }
+    }
+    return best && bestD <= best.w * 1.5 ? best : null;
   }
 
   private move(e: PointerEvent): void {
     const rect = this.canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    // バーより広い当たり判定: 最も近いバーを選ぶ
-    let best = -1;
-    let bestD = Infinity;
-    this.hits.forEach((h, i) => {
-      const d = Math.abs(h.x + h.w / 2 - x);
-      if (d < bestD) {
-        bestD = d;
-        best = i;
-      }
-    });
-    if (best < 0 || bestD > this.hits[best].w * 1.5) {
+    const h = this.nearest(e);
+    this.canvas.style.cursor = h && h.count > 0 ? 'pointer' : '';
+    if (!h) {
       this.tip.hidden = true;
       if (this.hover !== -1) {
         this.hover = -1;
@@ -264,9 +294,10 @@ export class HistogramView {
       }
       return;
     }
-    const h = this.hits[best];
+    const best = this.hits.indexOf(h);
     this.tip.hidden = false;
-    this.tip.textContent = m().viewer.tooltip(h.label, h.count.toLocaleString(), h.percent.toFixed(2));
+    const hint = h.count === 0 ? '' : this.selected === h.bin ? m().selection.clickToClear : m().selection.clickToSelect;
+    this.tip.textContent = m().viewer.tooltip(h.label, h.count.toLocaleString(), h.percent.toFixed(2)) + (hint ? `\n${hint}` : '');
     const tw = this.tip.offsetWidth;
     const left = Math.min(rect.width - tw - 4, Math.max(4, h.x + h.w / 2 - tw / 2));
     this.tip.style.left = `${left}px`;

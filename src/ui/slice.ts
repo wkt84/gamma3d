@@ -79,6 +79,30 @@ export function renderSlice(
   return { width, height, pixelW: grid.spacing[g.u], pixelH: grid.spacing[g.v], rgba };
 }
 
+/** 強調表示の色: 選んだ点はマゼンタ (線量・γ のカラーマップにない色)、それ以外は暗くする */
+const HIGHLIGHT: [number, number, number, number] = [255, 0, 255, 230];
+const DIM: [number, number, number, number] = [0, 0, 0, 150];
+
+/** 印 (mask が 1 の点) を強調する半透明の重ね画像。断面の向きは renderSlice と同じ */
+export function renderMask(grid: Grid, mask: Uint8Array, plane: Plane, ijk: Ijk): SliceImage {
+  const g = PLANES[plane];
+  const [nx, ny] = grid.dims;
+  const width = grid.dims[g.u];
+  const height = grid.dims[g.v];
+  const stride = [1, nx, nx * ny];
+  const base = ijk[g.w] * stride[g.w];
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  let p = 0;
+  for (let row = 0; row < height; row++) {
+    const v = g.flipV ? height - 1 - row : row;
+    const rowBase = base + v * stride[g.v];
+    for (let col = 0; col < width; col++, p += 4) {
+      rgba.set(mask[rowBase + col * stride[g.u]] ? HIGHLIGHT : DIM, p);
+    }
+  }
+  return { width, height, pixelW: grid.spacing[g.u], pixelH: grid.spacing[g.v], rgba };
+}
+
 /** 画像を矩形内にアスペクト比を保って配置したときの位置 (CSS ピクセル) */
 export function fitRect(img: Pick<SliceImage, 'width' | 'height' | 'pixelW' | 'pixelH'>, w: number, h: number) {
   const physW = img.width * img.pixelW;
@@ -137,14 +161,17 @@ export function drawSlice(
   cross: [number, number] | null,
   crossColor = 'rgba(255,255,255,0.55)',
   view: SliceView = FULL_VIEW,
+  overlay: SliceImage | null = null,
 ): void {
-  const tmp = document.createElement('canvas');
-  tmp.width = img.width;
-  tmp.height = img.height;
-  tmp.getContext('2d')!.putImageData(new ImageData(img.rgba, img.width, img.height), 0, 0);
   const r = viewRect(img, w, h, view);
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(tmp, r.x, r.y, r.w, r.h);
+  for (const layer of overlay ? [img, overlay] : [img]) {
+    const tmp = document.createElement('canvas');
+    tmp.width = layer.width;
+    tmp.height = layer.height;
+    tmp.getContext('2d')!.putImageData(new ImageData(layer.rgba, layer.width, layer.height), 0, 0);
+    ctx.drawImage(tmp, r.x, r.y, r.w, r.h);
+  }
   if (cross) {
     const cx = r.x + ((cross[0] + 0.5) / img.width) * r.w;
     const cy = r.y + ((cross[1] + 0.5) / img.height) * r.h;

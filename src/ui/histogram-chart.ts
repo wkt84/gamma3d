@@ -53,6 +53,8 @@ export interface HistSpec {
   title: string;
   xLabel: string;
   hist: Histogram;
+  /** ヒストグラムを作った各点の値 (比較元の格子の並び)。ビンを選んだときに該当点を求めるのに使う */
+  values: ArrayLike<number>;
   /** ビン [lo, hi) が基準内か */
   isPass: (lo: number, hi: number) => boolean;
   refLines: number[];
@@ -66,6 +68,8 @@ export interface HistSpec {
 }
 
 export interface BarHit {
+  /** ビンの番号 (binIndex と同じ。-1: underflow、ビン数: overflow) */
+  bin: number;
   x: number;
   w: number;
   label: string;
@@ -85,9 +89,19 @@ export function niceAxis(v: number): { max: number; step: number } {
 
 /**
  * ヒストグラムを描く。縦軸は全評価点に対する割合 (%)。
- * 戻り値はホバー判定用の各バーの位置。
+ * 戻り値はホバー判定用の各バーの位置。selected は選択中のビン (他のバーは薄くする)、
+ * bottomReserve は下端に空ける高さ (選択中の情報を重ねる場所)。
  */
-export function drawHistogram(ctx: CanvasRenderingContext2D, w: number, h: number, spec: HistSpec, t: ChartTheme, hover = -1): BarHit[] {
+export function drawHistogram(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  spec: HistSpec,
+  t: ChartTheme,
+  hover = -1,
+  selected: number | null = null,
+  bottomReserve = 0,
+): BarHit[] {
   const { hist } = spec;
   ctx.save();
   ctx.fillStyle = t.surface;
@@ -108,7 +122,7 @@ export function drawHistogram(ctx: CanvasRenderingContext2D, w: number, h: numbe
   const room = w - 20 - 16;
   const summaryRow = titleW + summaryW <= room ? 0 : legendW + summaryW <= room ? 1 : 2;
   const legendY = summaryRow === 2 ? 40 : 24;
-  const PAD = { ...BASE_PAD, t: BASE_PAD.t + (summaryRow === 2 ? 16 : 0) };
+  const PAD = { ...BASE_PAD, t: BASE_PAD.t + (summaryRow === 2 ? 16 : 0), b: BASE_PAD.b + bottomReserve };
 
   ctx.fillStyle = t.ink;
   ctx.font = font(13, 600);
@@ -175,12 +189,14 @@ export function drawHistogram(ctx: CanvasRenderingContext2D, w: number, h: numbe
 
   const gap = Math.min(2, slot * 0.25);
   const hits: BarHit[] = [];
-  const bar = (x: number, bw: number, p: number, pass: boolean, idx: number) => {
+  const bar = (x: number, bw: number, p: number, pass: boolean, idx: number, bin: number) => {
     if (p <= 0) return;
     const y = yOf(p);
     const bh = PAD.t + plotH - y;
+    const isSelected = selected === bin;
     ctx.fillStyle = pass ? t.pass : t.fail;
-    ctx.globalAlpha = hover >= 0 && hover !== idx ? 0.55 : 1;
+    // 選択中は他のバーを薄くし、選んだバーを縁取る
+    ctx.globalAlpha = selected !== null && !isSelected ? 0.3 : hover >= 0 && hover !== idx ? 0.55 : 1;
     const r = Math.min(2, bw / 2, bh);
     ctx.beginPath();
     ctx.moveTo(x, y + bh);
@@ -192,6 +208,11 @@ export function drawHistogram(ctx: CanvasRenderingContext2D, w: number, h: numbe
     ctx.closePath();
     ctx.fill();
     ctx.globalAlpha = 1;
+    if (isSelected) {
+      ctx.strokeStyle = t.ink;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
   };
 
   for (let b = 0; b < nb; b++) {
@@ -199,8 +220,8 @@ export function drawHistogram(ctx: CanvasRenderingContext2D, w: number, h: numbe
     const hi = lo + hist.binWidth;
     const x = xOf(lo) + gap / 2;
     const bw = Math.max(1, slot - gap);
-    bar(x, bw, pct(hist.counts[b]), spec.isPass(lo, hi), hits.length);
-    hits.push({ x: xOf(lo), w: slot, label: `${spec.fmtX(lo)} – ${spec.fmtX(hi)}`, count: hist.counts[b], percent: pct(hist.counts[b]) });
+    bar(x, bw, pct(hist.counts[b]), spec.isPass(lo, hi), hits.length, b);
+    hits.push({ bin: b, x: xOf(lo), w: slot, label: `${spec.fmtX(lo)} – ${spec.fmtX(hi)}`, count: hist.counts[b], percent: pct(hist.counts[b]) });
   }
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
@@ -216,14 +237,14 @@ export function drawHistogram(ctx: CanvasRenderingContext2D, w: number, h: numbe
   };
   if (hasUnder) {
     const x = PAD.l;
-    bar(x + gap / 2, slot - gap, pct(hist.underflow), false, hits.length);
-    hits.push({ x, w: slot, label: spec.underflowLabel!, count: hist.underflow, percent: pct(hist.underflow) });
+    bar(x + gap / 2, slot - gap, pct(hist.underflow), false, hits.length, -1);
+    hits.push({ bin: -1, x, w: slot, label: spec.underflowLabel!, count: hist.underflow, percent: pct(hist.underflow) });
     edgeLabel(spec.underflowLabel!, x + slot / 2);
   }
   if (hasOver) {
     const x = w - PAD.r - slot;
-    bar(x + gap / 2, slot - gap, pct(hist.overflow), spec.overflowPass ?? false, hits.length);
-    hits.push({ x, w: slot, label: spec.overflowLabel!, count: hist.overflow, percent: pct(hist.overflow) });
+    bar(x + gap / 2, slot - gap, pct(hist.overflow), spec.overflowPass ?? false, hits.length, nb);
+    hits.push({ bin: nb, x, w: slot, label: spec.overflowLabel!, count: hist.overflow, percent: pct(hist.overflow) });
     edgeLabel(spec.overflowLabel!, x + slot / 2);
   }
 

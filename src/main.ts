@@ -2,7 +2,7 @@ import './style.css';
 import { DEFAULT_PARAMS, type AnalysisParams } from './core/gamma.ts';
 import { judge, validLevels, type ActionLevels, type Judgment } from './core/judgment.ts';
 import { AnalysisCancelled, runAnalyses, type AnalysisResult } from './core/runner.ts';
-import { gammaStats, type GammaStats } from './core/stats.ts';
+import { binMask, gammaStats, type GammaStats } from './core/stats.ts';
 import { maxValue, resampleTo, shiftVolume, type Vec3, type Volume } from './core/volume.ts';
 import { buildDoseSets, scaled, scaleFactor, type DoseScale, type DoseSet } from './dicom/group.ts';
 import { parseRtDose, peekModality, type RtDose } from './dicom/rtdose.ts';
@@ -12,7 +12,7 @@ import { HistogramView, ProfileView, SlicePanel } from './ui/components.ts';
 import { extractProfile } from './ui/profile.ts';
 import type { ProfileSpec } from './ui/profile-chart.ts';
 import { derive, histSpecs, type DdUnit, type Derived } from './ui/results.ts';
-import { FULL_VIEW, imageToVoxel, panView, PLANES, renderSlice, voxelToImage, zoomView, type Ijk, type Plane, type SliceView } from './ui/slice.ts';
+import { FULL_VIEW, imageToVoxel, panView, PLANES, renderMask, renderSlice, voxelToImage, zoomView, type Ijk, type Plane, type SliceView } from './ui/slice.ts';
 import {
   applyTranslations,
   currentLang,
@@ -191,12 +191,14 @@ function renderViews(): void {
   const grid = display.ref;
   const cross = voxelToImage(plane, grid, cursor);
   const doseMap = doseColorMap(display.max, doseWindow());
+  const overlay = selection ? renderMask(grid, selection.mask, plane, cursor) : null;
+  updateSelectionBar();
 
-  panelRef.show(renderSlice(grid, grid.data, plane, cursor, doseMap, BG), cross);
+  panelRef.show(renderSlice(grid, grid.data, plane, cursor, doseMap, BG), cross, overlay);
   panelRef.setColorMap(doseMap);
 
   if (display.evalOnRef) {
-    panelEval.show(renderSlice(grid, display.evalOnRef, plane, cursor, doseMap, BG), cross);
+    panelEval.show(renderSlice(grid, display.evalOnRef, plane, cursor, doseMap, BG), cross, overlay);
     panelEval.setColorMap(doseMap);
   } else {
     panelEval.message(m().viewer.loadEval);
@@ -204,7 +206,7 @@ function renderViews(): void {
 
   const map = currentMap();
   if (map) {
-    panelMap.show(renderSlice(grid, map.values, plane, cursor, map.cmap, BG), cross);
+    panelMap.show(renderSlice(grid, map.values, plane, cursor, map.cmap, BG), cross, overlay);
     panelMap.setColorMap(map.cmap);
   } else {
     panelMap.message(m().viewer.afterRun);
@@ -217,6 +219,131 @@ function renderViews(): void {
   showReadout(cursor);
   renderProfiles();
 }
+
+// ───────── ヒストグラムのビンの選択 (該当する点を断面上で強調) ─────────
+
+interface BinSelection {
+  chart: number;
+  bin: number;
+  mask: Uint8Array;
+  count: number;
+  /** 軸ごと (x・y・z) の、各スライスに含まれる該当点の数 */
+  perSlice: [Int32Array, Int32Array, Int32Array];
+  /** 帯に出す「DD 1.13 – 1.5%」のような説明 (言語を切り替えたら作り直す) */
+  label: string;
+}
+let selection: BinSelection | null = null;
+
+const selectionBar = document.createElement('div');
+selectionBar.className = 'selection-bar';
+const selectionText = document.createElement('span');
+selectionText.className = 'text';
+const selSwatch = document.createElement('span');
+selSwatch.className = 'swatch';
+selSwatch.setAttribute('aria-hidden', 'true');
+const selPrev = document.createElement('button');
+selPrev.textContent = '◀';
+const selNext = document.createElement('button');
+selNext.textContent = '▶';
+const selClear = document.createElement('button');
+selClear.textContent = '✕';
+selectionBar.append(selSwatch, selectionText, selPrev, selNext, selClear);
+
+/** 選んだビンの説明 (範囲には単位を付ける。範囲外のビンはグラフのラベルのまま) */
+function selectionLabel(chart: number, bin: number): string {
+  if (!result || !derived) return '';
+  const spec = histSpecs(result, derived, ddUnit)[chart];
+  const nb = spec.hist.counts.length;
+  const unit = [ddUnit === 'percent' ? '%' : ' Gy', ' mm', ''][chart];
+  const lo = spec.hist.min + bin * spec.hist.binWidth;
+  const range = bin < 0 ? spec.underflowLabel! : bin >= nb ? spec.overflowLabel! : `${spec.fmtX(lo)} – ${spec.fmtX(lo + spec.hist.binWidth)}${unit}`;
+  return `${['DD', 'DTA', 'γ'][chart]} ${range}`;
+}
+
+function selectBin(chart: number, bin: number | null): void {
+  if (bin === null || !result || !derived || !display) {
+    clearSelection();
+    return;
+  }
+  const spec = histSpecs(result, derived, ddUnit)[chart];
+  const { mask, count } = binMask(spec.values, spec.hist, bin);
+  const [nx, ny, nz] = display.ref.dims;
+  const perSlice: [Int32Array, Int32Array, Int32Array] = [new Int32Array(nx), new Int32Array(ny), new Int32Array(nz)];
+  for (let n = 0; n < mask.length; n++) {
+    if (!mask[n]) continue;
+    perSlice[0][n % nx]++;
+    perSlice[1][Math.floor(n / nx) % ny]++;
+    perSlice[2][Math.floor(n / (nx * ny))]++;
+  }
+  selection = { chart, bin, mask, count, perSlice, label: selectionLabel(chart, bin) };
+  charts.forEach((c, i) => c.setSelection(i === chart ? bin : null, i === chart ? selectionBar : null));
+  renderViews();
+}
+
+function clearSelection(render = true): void {
+  if (!selection) return;
+  selection = null;
+  charts.forEach((c) => c.setSelection(null, null));
+  if (render) renderViews();
+}
+
+charts.forEach((c, i) => (c.onSelect = (bin) => selectBin(i, bin)));
+
+function updateSelectionBar(): void {
+  if (!selection || !display) return;
+  const w = PLANES[plane].w;
+  const counts = selection.perSlice[w];
+  const k = cursor[w];
+  selectionText.textContent = m().selection.summary(selection.label, selection.count.toLocaleString(), counts[k].toLocaleString());
+  selectionBar.title = selectionText.textContent;
+  selPrev.disabled = !counts.subarray(0, k).some((c) => c > 0);
+  selNext.disabled = !counts.subarray(k + 1).some((c) => c > 0);
+  const t = m().selection;
+  for (const [b, label] of [
+    [selPrev, t.prev],
+    [selNext, t.next],
+    [selClear, t.clear],
+  ] as const) {
+    b.title = label;
+    b.setAttribute('aria-label', label);
+  }
+}
+
+/** 表示中の断面に垂直な方向で、該当する点のある次 (dir = 1) / 前 (−1) のスライスへ移り、そのスライスで最も近い該当点へ十字カーソルを置く */
+function jumpToSelected(dir: 1 | -1): void {
+  if (!selection || !display) return;
+  const g = PLANES[plane];
+  const counts = selection.perSlice[g.w];
+  let k = cursor[g.w] + dir;
+  while (k >= 0 && k < counts.length && counts[k] === 0) k += dir;
+  if (k < 0 || k >= counts.length) return;
+  const grid = display.ref;
+  const [nx, ny] = grid.dims;
+  const stride = [1, nx, nx * ny];
+  let best: [number, number] | null = null;
+  let bestD = Infinity;
+  for (let v = 0; v < grid.dims[g.v]; v++) {
+    for (let u = 0; u < grid.dims[g.u]; u++) {
+      if (!selection.mask[k * stride[g.w] + v * stride[g.v] + u * stride[g.u]]) continue;
+      const d = ((u - cursor[g.u]) * grid.spacing[g.u]) ** 2 + ((v - cursor[g.v]) * grid.spacing[g.v]) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = [u, v];
+      }
+    }
+  }
+  cursor[g.w] = k;
+  if (best) [cursor[g.u], cursor[g.v]] = best;
+  syncSlider();
+  renderViews();
+}
+
+selPrev.addEventListener('click', () => jumpToSelected(-1));
+selNext.addEventListener('click', () => jumpToSelected(1));
+selClear.addEventListener('click', () => clearSelection());
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && selection) clearSelection();
+});
 
 // ───────── ズーム・表示範囲 ─────────
 
@@ -332,6 +459,8 @@ const gridEl = $('.grid');
 for (const b of $$<HTMLButtonElement>('.bottom-view button')) {
   b.addEventListener('click', () => {
     showProfiles = b.dataset.bottom === 'profile';
+    // 選択の帯はヒストグラムに出すので、プロファイルに切り替えたら解除する
+    if (showProfiles) clearSelection();
     gridEl.classList.toggle('show-profiles', showProfiles);
     $$<HTMLButtonElement>('.bottom-view button').forEach((x) => {
       x.classList.toggle('active', x === b);
@@ -417,6 +546,8 @@ mapSelect.addEventListener('change', () => {
 });
 ddUnitSelect.addEventListener('change', () => {
   ddUnit = ddUnitSelect.value as DdUnit;
+  // 線量差のビンは単位で変わるので、線量差の選択は解除する
+  if (selection?.chart === 0) clearSelection(false);
   renderViews();
   renderCharts();
 });
@@ -573,6 +704,7 @@ function evalVolume(set: DoseSet): Volume {
 /** データ・係数が変わったとき: 結果を破棄して表示を作り直す */
 function onDataChanged(resetCursor: boolean): void {
   if (result) setStatus(runStatus, null);
+  clearSelection(false);
   results = [];
   resultStats = [];
   result = null;
@@ -1034,6 +1166,7 @@ function stat(label: string, value: string, sub: string, cls = ''): HTMLElement 
 /** 表示する結果を切り替える (一括計算の比較表から) */
 function selectResult(i: number): void {
   if (!display || !results[i]) return;
+  clearSelection(false);
   result = results[i];
   derived = derive(result);
   display.evalOnRef = result.evalOnRef;
@@ -1184,6 +1317,7 @@ onLangChange(() => {
   applyTranslations();
   localizeStatic();
   applyView();
+  if (selection) selection.label = selectionLabel(selection.chart, selection.bin);
   savedGroup.label = m().presets.savedGroup;
   for (const side of Object.values(sides)) {
     if (side.fileCount) renderSide(side);
