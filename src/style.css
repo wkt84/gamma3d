@@ -450,6 +450,60 @@ progress {
   align-items: stretch;
 }
 
+table.compare {
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  align-self: stretch;
+}
+
+table.compare caption {
+  caption-side: top;
+  text-align: left;
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 0 0 4px;
+}
+
+table.compare th,
+table.compare td {
+  padding: 3px 10px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+}
+
+table.compare th:first-child,
+table.compare td:first-child {
+  text-align: left;
+}
+
+table.compare th {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+table.compare td button {
+  font-size: 12px;
+  padding: 2px 8px;
+  background: transparent;
+  border-color: transparent;
+}
+
+table.compare tr.selected td {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+table.compare tr.selected td button {
+  font-weight: 700;
+}
+
+table.compare .judgment {
+  margin: 0;
+}
+
 .summary .empty {
   margin: 0;
   color: var(--text-muted);

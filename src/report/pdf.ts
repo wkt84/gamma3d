@@ -7,6 +7,7 @@ import { histSpecs, type DdUnit, type Derived } from '../ui/results.ts';
 import { drawSlice, PLANES, renderSlice, voxelToImage, type Ijk, type Plane } from '../ui/slice.ts';
 import type { Vec3 } from '../core/volume.ts';
 import { judge, type ActionLevels, type Judgment } from '../core/judgment.ts';
+import type { GammaStats } from '../core/stats.ts';
 import { m, text as msgText, type Msg } from '../i18n/index.ts';
 
 export interface ReportSide {
@@ -26,6 +27,8 @@ export interface ReportInput {
   shift: Vec3;
   /** 判定基準 (不正なら null で、判定は載せない) */
   levels: ActionLevels | null;
+  /** 一括計算したときの条件の比較 (1 条件なら null) */
+  comparison: { label: string; stats: GammaStats; selected: boolean }[] | null;
   warnings: Msg[];
   cursor: Ijk;
   includePatient: boolean;
@@ -241,6 +244,51 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
     });
   });
   y += 42;
+
+  // 一括計算の比較表
+  if (input.comparison) {
+    y = heading(t.comparison, y + 1);
+    const cols = [
+      { h: m().compare.criteria, w: 50, align: 'left' as const },
+      { h: m().compare.passRate, w: 30, align: 'right' as const },
+      { h: m().compare.mean, w: 30, align: 'right' as const },
+      { h: m().compare.p99, w: 30, align: 'right' as const },
+      { h: m().compare.judgment, w: 42, align: 'right' as const },
+    ];
+    const row = (cells: string[], yy: number, weight: 'normal' | 'bold', colors?: ([number, number, number] | null)[]) => {
+      let x = M;
+      cols.forEach((c, ci) => {
+        const color = colors?.[ci];
+        if (color) doc.setTextColor(...color);
+        else ink(weight === 'bold' ? 60 : 20);
+        text(cells[ci], c.align === 'left' ? x + 1 : x + c.w - 1, yy, 8.5, weight, { align: c.align });
+        x += c.w;
+      });
+    };
+    row(cols.map((c) => c.h), y, 'bold');
+    y += 5;
+    for (const c of input.comparison) {
+      const j = input.levels ? judge(c.stats.passRate, input.levels) : null;
+      if (c.selected) {
+        doc.setFillColor(238, 243, 251);
+        doc.rect(M, y - 0.8, cols.reduce((a, col) => a + col.w, 0), 5, 'F');
+      }
+      row(
+        [
+          c.selected ? t.comparisonShown(c.label) : c.label,
+          `${fmt(c.stats.passRate, 2)}%`,
+          fmt(c.stats.mean, 3),
+          fmt(c.stats.p99, 3),
+          j ? `${JUDGMENT_MARK[j]} ${m().judgment[j]}` : '–',
+        ],
+        y,
+        c.selected ? 'bold' : 'normal',
+        [null, null, null, null, j ? JUDGMENT_RGB[j] : null],
+      );
+      y += 5;
+    }
+    y += 1;
+  }
 
   // ヒストグラム
   y = heading(t.histograms, y + 1);
