@@ -534,3 +534,69 @@ test('ヒストグラムのビンをクリックすると該当する点を断�
   await expect(page.locator('.selection-bar')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+test('結果を CSV・JSON・マップ (NRRD の ZIP) で書き出せ、値が画面と一致する', async ({ page }) => {
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, readdirSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { gunzipSync } = await import('node:zlib');
+
+  await load(page);
+  await expect(page.locator('#export-csv')).toBeDisabled();
+  await page.check('#p-batch');
+  await analyze(page);
+  const shownRate = Number((await page.locator('.stat .value').first().textContent())!.replace('%', ''));
+  const save = async (id: string) => {
+    const [d] = await Promise.all([page.waitForEvent('download'), page.click(id)]);
+    return { name: d.suggestedFilename(), bytes: readFileSync((await d.path())!) };
+  };
+
+  // CSV: 1 条件 1 行 (一括計算で 4 行)。患者情報は既定では含めない
+  const csv = await save('#export-csv');
+  expect(csv.name).toMatch(/^gamma3d_results_\d{8}_\d{4}\.csv$/);
+  const lines = csv.bytes.toString('utf8').replace(/^﻿/, '').trim().split('\r\n');
+  const header = lines[0].split(',');
+  expect(lines).toHaveLength(5);
+  expect(header).not.toContain('patient_id');
+  const rows = lines.slice(1).map((l) => Object.fromEntries(l.split(',').map((v, i) => [header[i], v])));
+  expect(rows.map((r) => r.criteria)).toEqual(['3%/3mm', '3%/2mm', '2%/2mm', '1%/1mm']);
+  expect(rows.filter((r) => r.shown === 'true')).toHaveLength(1);
+  expect(Number(rows[0].gamma_pass_rate)).toBeCloseTo(shownRate, 2);
+
+  // JSON: 患者情報を含めるとファイル名にも患者 ID が入る
+  await page.check('#x-patient');
+  const json = await save('#export-json');
+  expect(json.name).toMatch(/^gamma3d_GAMMA3D-001_results_\d{8}_\d{4}\.json$/);
+  const data = JSON.parse(json.bytes.toString('utf8'));
+  expect(data.kind).toBe('gamma3d-results');
+  expect(data.results).toHaveLength(4);
+  expect(data.reference.patientId).toBe('GAMMA3D-001');
+  expect(data.reference.grid.dims).toEqual([96, 88, 64]);
+  expect(data.evaluated.shiftMm).toEqual([0, 0, 0]);
+
+  // マップ: ZIP の中の NRRD。γ のマップから求めたパス率が画面の値と一致する
+  const maps = await save('#export-maps');
+  expect(maps.name).toMatch(/_maps_\d{8}_\d{4}\.zip$/);
+  const dir = mkdtempSync(join(tmpdir(), 'gamma3d-maps-'));
+  const zipPath = join(dir, 'maps.zip');
+  (await import('node:fs')).writeFileSync(zipPath, maps.bytes);
+  execFileSync('python3', ['-c', 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; z.extractall(sys.argv[2])', zipPath, dir]);
+  expect(readdirSync(dir).sort()).toEqual(['dd_gy.nrrd', 'dd_percent.nrrd', 'dta_mm.nrrd', 'eval_dose.nrrd', 'gamma.nrrd', 'maps.zip', 'ref_dose.nrrd', 'results.json']);
+  const nrrd = readFileSync(join(dir, 'gamma.nrrd'));
+  const split = nrrd.indexOf('\n\n');
+  const head = nrrd.subarray(0, split).toString('latin1');
+  expect(head).toContain('sizes: 96 88 64');
+  expect(head).toContain('space: left-posterior-superior');
+  const raw = gunzipSync(nrrd.subarray(split + 2));
+  const gamma = new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / 4);
+  let n = 0;
+  let pass = 0;
+  for (const g of gamma) {
+    if (Number.isNaN(g)) continue;
+    n++;
+    if (g <= 1) pass++;
+  }
+  expect((100 * pass) / n).toBeCloseTo(shownRate, 2);
+  await expect(page.locator('#export-status')).toContainText('書き出しました');
+});

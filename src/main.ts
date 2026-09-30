@@ -1075,6 +1075,7 @@ function updateButtons(): void {
   runBtn.disabled = running || !display?.evalOnRef;
   cancelBtn.hidden = !running;
   pdfBtn.disabled = running || !result;
+  for (const b of ['#export-csv', '#export-json', '#export-maps']) $<HTMLButtonElement>(b).disabled = running || !result;
 }
 
 runBtn.addEventListener('click', async () => {
@@ -1280,6 +1281,55 @@ function renderSummary(): void {
   }
   box.replaceChildren(...nodes);
 }
+
+// ───────── 結果の書き出し (CSV・JSON・NRRD) ─────────
+
+const exportButtons = ['#export-csv', '#export-json', '#export-maps'].map((id) => $<HTMLButtonElement>(id));
+
+function download(data: BlobPart, type: string, name: string): void {
+  const url = URL.createObjectURL(new Blob([data], { type }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+async function exportResults(kind: 'csv' | 'json' | 'maps'): Promise<void> {
+  if (!result || !sides.ref.selected || !sides.eval.selected) return;
+  const status = $('#export-status');
+  exportButtons.forEach((b) => (b.disabled = true));
+  setStatus(status, (t) => t.export.creating);
+  try {
+    const x = await import('./export/results.ts');
+    const input = {
+      version: __APP_VERSION__,
+      createdAt: new Date(),
+      ref: { set: sides.ref.selected, scale: scaleOf(sides.ref), plan: planOf(sides.ref) },
+      ev: { set: sides.eval.selected, scale: scaleOf(sides.eval), plan: planOf(sides.eval) },
+      shift: shiftOf(),
+      levels: levelsOf(),
+      results,
+      shown: result,
+      warnings: [...crossWarnings(), ...sides.ref.selected.warnings, ...sides.eval.selected.warnings],
+      includePatient: $<HTMLInputElement>('#x-patient').checked,
+    };
+    let name: string;
+    if (kind === 'csv') download(x.resultsCsv(input), 'text/csv', (name = x.exportFileName(input, 'results', 'csv')));
+    else if (kind === 'json') download(x.resultsJson(input), 'application/json', (name = x.exportFileName(input, 'results', 'json')));
+    else download(await x.mapsZip(input), 'application/zip', (name = x.exportFileName(input, 'maps', 'zip')));
+    setStatus(status, (t) => t.export.done(name));
+  } catch (e) {
+    const err = errorMsg(e);
+    setStatus(status, (t) => t.run.error(err(t)));
+  } finally {
+    updateButtons();
+  }
+}
+
+$('#export-csv').addEventListener('click', () => void exportResults('csv'));
+$('#export-json').addEventListener('click', () => void exportResults('json'));
+$('#export-maps').addEventListener('click', () => void exportResults('maps'));
 
 // ───────── PDF ─────────
 

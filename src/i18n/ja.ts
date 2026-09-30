@@ -135,6 +135,19 @@ export const ja = {
     fontError: (file: S) => `フォントを読み込めません (${file})`,
   },
 
+  export: {
+    title: '結果の書き出し',
+    includePatient: '患者情報を含める',
+    csv: 'CSV',
+    csvTitle: '統計値と解析条件を 1 条件 1 行の表で書き出します (集計用)',
+    json: 'JSON',
+    jsonTitle: '統計値・解析条件・データの情報を JSON で書き出します',
+    maps: 'マップ (NRRD)',
+    mapsTitle: 'γ・線量差・DTA・線量のマップを NRRD 形式 (3D Slicer などで開ける) で ZIP にまとめて書き出します',
+    creating: '書き出し中…',
+    done: (file: S) => `${file} を書き出しました`,
+  },
+
   viewer: {
     plane: '断面',
     slice: 'スライス',

@@ -164,6 +164,17 @@
           <button id="pdf" disabled data-i18n="report.button"></button>
           <p id="pdf-status" class="hint" aria-live="polite"></p>
         </section>
+
+        <section class="card export">
+          <h2 data-i18n="export.title"></h2>
+          <label class="inline"><input type="checkbox" id="x-patient" /> <span data-i18n="export.includePatient"></span></label>
+          <div class="export-buttons">
+            <button id="export-csv" disabled data-i18n="export.csv" data-i18n-title="export.csvTitle"></button>
+            <button id="export-json" disabled data-i18n="export.json" data-i18n-title="export.jsonTitle"></button>
+            <button id="export-maps" disabled data-i18n="export.maps" data-i18n-title="export.mapsTitle"></button>
+          </div>
+          <p id="export-status" class="hint" aria-live="polite"></p>
+        </section>
       </aside>
 
       <main class="result-pane" data-i18n-aria-label="app.resultPane">
