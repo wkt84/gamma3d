@@ -6,6 +6,7 @@ import { drawHistogram, LIGHT_CHART_THEME } from '../ui/histogram-chart.ts';
 import { histSpecs, type DdUnit, type Derived } from '../ui/results.ts';
 import { drawSlice, PLANES, renderSlice, voxelToImage, type Ijk, type Plane } from '../ui/slice.ts';
 import type { Vec3 } from '../core/volume.ts';
+import { judge, type ActionLevels, type Judgment } from '../core/judgment.ts';
 import { m, text as msgText, type Msg } from '../i18n/index.ts';
 
 export interface ReportSide {
@@ -23,6 +24,8 @@ export interface ReportInput {
   displayMax: number;
   /** 比較先の平行移動 (mm) */
   shift: Vec3;
+  /** 判定基準 (不正なら null で、判定は載せない) */
+  levels: ActionLevels | null;
   warnings: Msg[];
   cursor: Ijk;
   includePatient: boolean;
@@ -170,6 +173,7 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
       [t.grid, t.gridValue(`${nx}×${ny}×${nz}`)],
       [t.evalInterp, t.evalInterpValue],
       [t.shift, shifted ? t.shiftValue(sx, sy, sz) : t.noShift],
+      ...(input.levels ? [[t.levels, t.levelsValue(input.levels.tolerance, input.levels.action)] as [string, string]] : []),
     ],
     y,
     2,
@@ -179,6 +183,9 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
   // 結果
   y = heading(t.results, y + 3);
   const boxW = (CW - 8) / 3;
+  const judgment = input.levels ? judge(d.gamma.passRate, input.levels) : null;
+  const JUDGMENT_RGB: Record<Judgment, [number, number, number]> = { pass: [12, 130, 12], review: [190, 120, 0], fail: [208, 59, 59] };
+  const JUDGMENT_MARK: Record<Judgment, string> = { pass: '✓', review: '!', fail: '×' };
   const boxes: { title: string; big: string; lines: [string, string][] }[] = [
     {
       title: t.gamma,
@@ -220,6 +227,11 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
     text(b.title, x + 3, y + 2.5, 8.5, 'bold');
     ink(10);
     text(b.big, x + 3, y + 7, 17, 'bold');
+    if (i === 0 && judgment) {
+      // 判定は色だけでなく記号と文字でも示す
+      doc.setTextColor(...JUDGMENT_RGB[judgment]);
+      text(`${JUDGMENT_MARK[judgment]} ${m().judgment[judgment]}`, x + boxW - 3, y + 9, 11, 'bold', { align: 'right' });
+    }
     b.lines.forEach(([k, v], li) => {
       if (!k) return;
       ink(100);

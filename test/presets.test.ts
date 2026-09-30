@@ -13,6 +13,8 @@ const params: PresetParams = {
   gradientThresholdPercentPerMm: 3,
   gammaCap: 2,
   stepsPerDta: 10,
+  toleranceLevel: 95,
+  actionLevel: 90,
 };
 
 class MemoryStorage {
@@ -37,6 +39,13 @@ describe('プリセット', () => {
     expect(validateParams({ ...params, normAuto: false, normDoseGy: 2 })?.normDoseGy).toBe(2);
     // 自動のときに値が入っていても捨てる
     expect(validateParams({ ...params, normDoseGy: 2 })?.normDoseGy).toBeNull();
+    // 判定基準: アクションレベルは許容レベル以下
+    expect(validateParams({ ...params, toleranceLevel: 90, actionLevel: 95 })).toBeNull();
+  });
+
+  it('判定基準を持たない以前のプリセットは既定値 (95% / 90%) で補う', () => {
+    const { toleranceLevel: _t, actionLevel: _a, ...old } = params;
+    expect(validateParams(old)).toEqual({ ...params, toleranceLevel: 95, actionLevel: 90 });
   });
 
   it('同じ名前は上書きし、名前順に並べる', () => {
