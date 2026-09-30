@@ -612,6 +612,7 @@ table.compare .judgment {
 .toolbar {
   display: flex;
   flex-wrap: wrap;
+  /* 1 行目 (操作) と 2 行目 (値表示) の 2 行に固定する。1 行目はスライダーの幅で調整する */
   gap: 6px 14px;
   align-items: center;
   /* 縦方向の flex コンテナ内で縮められないようにする */
@@ -622,14 +623,36 @@ table.compare .judgment {
   flex-shrink: 0;
 }
 
-.slice-ctrl {
+.toolbar > .slice-ctrl {
+  /* 折り返しは flex-basis で決まるため 0 にし、最小幅 (見出し・位置表示・短いスライダー) だけを確保する */
+  flex: 1 1 0;
+  min-width: 290px;
+  white-space: nowrap;
   flex-direction: row;
   align-items: center;
   gap: 8px;
 }
 
 .slice-ctrl input {
-  width: 220px;
+  flex: 1 1 220px;
+  min-width: 60px;
+  max-width: 220px;
+}
+
+.toolbar > .bottom-view {
+  margin-left: auto;
+}
+
+.hint-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: help;
 }
 
 #slice-label {
@@ -719,6 +742,70 @@ figure {
   cursor: crosshair;
 }
 
+.panel-body canvas.zoomed {
+  cursor: grab;
+}
+
+.panel-body canvas.dragging {
+  cursor: grabbing;
+}
+
+/* 表示範囲のメニュー (ツールバーから下へ開く) */
+.window-menu {
+  position: relative;
+}
+
+.window-menu summary {
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  cursor: pointer;
+  list-style: none;
+  white-space: nowrap;
+}
+
+.window-menu summary::after {
+  content: ' ▾';
+}
+
+.window-menu .menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 10;
+  display: grid;
+  gap: 8px;
+  width: 240px;
+  padding: 10px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+
+.window-menu label {
+  display: grid;
+  grid-template-columns: 1fr 80px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.window-menu input {
+  width: 100%;
+}
+
+.zoom-chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .panel-msg {
   position: absolute;
   inset: 0;
@@ -800,12 +887,6 @@ figure {
   font-size: 12px;
 }
 
-/* 幅が足りないときは操作ヒントを隠し、ツールバーを 2 行に保つ */
-@media (max-width: 1400px) {
-  .toolbar .hint {
-    display: none;
-  }
-}
 
 @media (max-width: 1100px) {
   .layout {

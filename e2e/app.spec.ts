@@ -409,3 +409,70 @@ test('下段をプロファイルに切り替えると x・y・z のプロファ
   await expect(page.locator('#chart-gamma canvas')).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('Ctrl+ホイールで 3 パネルが同期してズームし、ドラッグで移動、表示範囲の変更とリセットができる', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await load(page);
+  await analyze(page);
+  const pixels = (id: string) => page.locator(`${id} canvas`).evaluate((c: HTMLCanvasElement) => c.toDataURL());
+  const before = await Promise.all(['#panel-ref', '#panel-eval', '#panel-map'].map(pixels));
+
+  const box = (await page.locator('#panel-ref canvas').boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.4);
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -100);
+  await page.keyboard.up('Control');
+  await expect(page.locator('#zoom-reset')).toBeVisible();
+  await expect(page.locator('#zoom-reset')).toHaveText(/^×\d\.\d$/);
+  await expect(sliceLabel(page)).toHaveText(/^32\/64/); // Ctrl+ホイールではスライスは動かない
+  const zoomed = await Promise.all(['#panel-ref', '#panel-eval', '#panel-map'].map(pixels));
+  zoomed.forEach((z, i) => expect(z).not.toBe(before[i]));
+
+  // ドラッグで表示位置が動く (3 パネルとも)
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.6, { steps: 5 });
+  await page.mouse.up();
+  const panned = await Promise.all(['#panel-ref', '#panel-eval', '#panel-map'].map(pixels));
+  panned.forEach((p, i) => expect(p).not.toBe(zoomed[i]));
+
+  // ズーム中もホイールでスライス送り、ダブルクリックでカーソル移動ができる
+  await page.mouse.wheel(0, 100);
+  await expect(sliceLabel(page)).toHaveText(/^31\/64/);
+  await page.click('.plane button[data-plane="sagittal"]');
+  await expect(page.locator('#zoom-reset')).toBeHidden(); // ズームは断面ごと
+  await page.click('.plane button[data-plane="axial"]');
+  await expect(page.locator('#zoom-reset')).toBeVisible();
+
+  // 表示範囲: 最大と低線量の閾値
+  await page.click('.window-menu summary');
+  await page.fill('#win-max', '1');
+  await page.locator('#win-max').dispatchEvent('change');
+  await expect(page.locator('#panel-ref .colorbar .ticks span').last()).toHaveText('1.00 Gy');
+  await page.fill('#win-cut', '50');
+  await page.locator('#win-cut').dispatchEvent('change');
+  await expect(page.locator('#panel-eval .colorbar .extras')).toContainText('0.99 Gy');
+  // 最小 ≥ 最大は不正 (赤枠にして既定の範囲で表示)
+  await page.fill('#win-min', '2');
+  await page.locator('#win-min').dispatchEvent('change');
+  await expect(page.locator('#win-min')).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.locator('#panel-ref .colorbar .ticks span').last()).toHaveText('1.98 Gy');
+
+  // リセットで初期表示に戻る
+  await page.click('#view-reset');
+  await expect(page.locator('#zoom-reset')).toBeHidden();
+  await expect(page.locator('#win-max')).toHaveValue('');
+  await expect(page.locator('#panel-eval .colorbar .extras')).toHaveCount(0);
+  await page.mouse.click(10, 10); // メニューの外をクリックすると閉じる
+  await expect(page.locator('.window-menu')).not.toHaveAttribute('open', '');
+  expect(await pixels('#panel-ref')).not.toBe(before[0]); // スライスは 31 のまま
+
+  // ズームしたままでも PDF は出力できる (断面は全体を載せる)
+  await page.keyboard.down('Control');
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await page.mouse.wheel(0, -300);
+  await page.keyboard.up('Control');
+  const [download] = await Promise.all([page.waitForEvent('download', { timeout: 60_000 }), page.click('#pdf')]);
+  expect(download.suggestedFilename()).toMatch(/\.pdf$/);
+  expect(errors).toEqual([]);
+});

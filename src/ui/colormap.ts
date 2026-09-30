@@ -57,13 +57,24 @@ function fromTable(table: RGB[], min: number, max: number, v: number): RGB | nul
 
 const fmt = (v: number, d = 1) => (Math.abs(v) < 1e-9 ? '0' : v.toFixed(d));
 
-export function doseColorMap(maxDose: number): ColorMap {
+/** 線量の表示範囲。lowCut 未満の線量は描かない (背景色) */
+export interface DoseWindow {
+  min: number;
+  max: number;
+  lowCut: number;
+}
+
+export function doseColorMap(maxDose: number, window: Partial<DoseWindow> = {}): ColorMap {
+  const min = window.min ?? 0;
+  const max = window.max ?? maxDose;
+  const lowCut = window.lowCut ?? 0;
   return {
-    rgb: (v) => (Number.isNaN(v) ? null : fromTable(TURBO, 0, maxDose, v)),
+    rgb: (v) => (Number.isNaN(v) || v < lowCut ? null : fromTable(TURBO, min, max, v)),
     gradient: gradientCss(TURBO),
-    min: 0,
-    max: maxDose,
-    ticks: [0, 0.5, 1].map((f) => ({ value: f * maxDose, label: `${fmt(f * maxDose, 2)} Gy` })),
+    min,
+    max,
+    ticks: [0, 0.5, 1].map((f) => ({ value: min + f * (max - min), label: `${fmt(min + f * (max - min), 2)} Gy` })),
+    extras: lowCut > 0 ? [{ color: 'rgb(10,10,10)', label: m().viewer.lowCutLegend(fmt(lowCut, 2)) }] : undefined,
   };
 }
 

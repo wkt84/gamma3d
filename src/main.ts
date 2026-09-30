@@ -7,12 +7,12 @@ import { maxValue, resampleTo, shiftVolume, type Vec3, type Volume } from './cor
 import { buildDoseSets, scaled, scaleFactor, type DoseScale, type DoseSet } from './dicom/group.ts';
 import { parseRtDose, peekModality, type RtDose } from './dicom/rtdose.ts';
 import { parseRtPlan, type RtPlan } from './dicom/rtplan.ts';
-import { ddColorMap, doseColorMap, dtaColorMap, gammaColorMap, gradientColorMap, type ColorMap } from './ui/colormap.ts';
+import { ddColorMap, doseColorMap, dtaColorMap, gammaColorMap, gradientColorMap, type ColorMap, type DoseWindow } from './ui/colormap.ts';
 import { HistogramView, ProfileView, SlicePanel } from './ui/components.ts';
 import { extractProfile } from './ui/profile.ts';
 import type { ProfileSpec } from './ui/profile-chart.ts';
 import { derive, histSpecs, type DdUnit, type Derived } from './ui/results.ts';
-import { imageToVoxel, PLANES, renderSlice, voxelToImage, type Ijk, type Plane } from './ui/slice.ts';
+import { FULL_VIEW, imageToVoxel, panView, PLANES, renderSlice, voxelToImage, zoomView, type Ijk, type Plane, type SliceView } from './ui/slice.ts';
 import {
   applyTranslations,
   currentLang,
@@ -190,7 +190,7 @@ function renderViews(): void {
   }
   const grid = display.ref;
   const cross = voxelToImage(plane, grid, cursor);
-  const doseMap = doseColorMap(display.max);
+  const doseMap = doseColorMap(display.max, doseWindow());
 
   panelRef.show(renderSlice(grid, grid.data, plane, cursor, doseMap, BG), cross);
   panelRef.setColorMap(doseMap);
@@ -217,6 +217,70 @@ function renderViews(): void {
   showReadout(cursor);
   renderProfiles();
 }
+
+// ───────── ズーム・表示範囲 ─────────
+
+/** 断面ごとの拡大表示 (3 パネルで共通) */
+const views: Record<Plane, SliceView> = { axial: FULL_VIEW, coronal: FULL_VIEW, sagittal: FULL_VIEW };
+const zoomReset = $<HTMLButtonElement>('#zoom-reset');
+
+function applyView(): void {
+  const v = views[plane];
+  panels.forEach((p) => p.setView(v));
+  zoomReset.hidden = v.zoom === 1;
+  zoomReset.textContent = m().viewer.zoom(v.zoom.toFixed(1));
+}
+
+for (const p of panels) {
+  p.onZoom = (f, anchor) => {
+    views[plane] = zoomView(views[plane], f, anchor);
+    applyView();
+  };
+  p.onPan = (du, dv) => {
+    views[plane] = panView(views[plane], du, dv);
+    applyView();
+  };
+}
+zoomReset.addEventListener('click', () => {
+  views[plane] = FULL_VIEW;
+  applyView();
+});
+
+const winMin = $<HTMLInputElement>('#win-min');
+const winMax = $<HTMLInputElement>('#win-max');
+const winCut = $<HTMLInputElement>('#win-cut');
+
+/** 線量の表示範囲。不正な欄は赤枠にして既定値 (0 – 最大線量、隠さない) を使う */
+function doseWindow(): Partial<DoseWindow> {
+  const max = winMax.value.trim() === '' ? (display?.max ?? 1) : Number(winMax.value);
+  const min = winMin.value.trim() === '' ? 0 : Number(winMin.value);
+  const cut = winCut.value.trim() === '' ? 0 : Number(winCut.value);
+  const rangeOk = Number.isFinite(min) && Number.isFinite(max) && min >= 0 && max > min;
+  const cutOk = Number.isFinite(cut) && cut >= 0 && cut < 100;
+  winMin.setAttribute('aria-invalid', String(!rangeOk));
+  winMax.setAttribute('aria-invalid', String(!rangeOk));
+  winCut.setAttribute('aria-invalid', String(!cutOk));
+  return {
+    ...(rangeOk ? { min, max } : {}),
+    lowCut: cutOk ? ((display?.max ?? 0) * cut) / 100 : 0,
+  };
+}
+
+for (const input of [winMin, winMax, winCut]) input.addEventListener('change', () => renderViews());
+// メニューの外をクリックしたら閉じる
+const windowMenu = $<HTMLDetailsElement>('.window-menu');
+document.addEventListener('pointerdown', (e) => {
+  if (windowMenu.open && !windowMenu.contains(e.target as Node)) windowMenu.open = false;
+});
+
+$('#view-reset').addEventListener('click', () => {
+  for (const k of Object.keys(views) as Plane[]) views[k] = FULL_VIEW;
+  winMin.value = '0';
+  winMax.value = '';
+  winCut.value = '0';
+  applyView();
+  renderViews();
+});
 
 /** 十字カーソルを通る x・y・z 方向の線量プロファイル (γ は解析後に下の帯へ) */
 function renderProfiles(): void {
@@ -342,6 +406,7 @@ for (const b of $$<HTMLButtonElement>('.plane button')) {
     plane = b.dataset.plane as Plane;
     $$('.plane button').forEach((x) => x.classList.toggle('active', x === b));
     syncSlider();
+    applyView();
     renderViews();
   });
 }
@@ -526,6 +591,10 @@ function onDataChanged(resetCursor: boolean): void {
     const sameGrid = display && display.ref.dims.join() === refVol.dims.join();
     display = { ref: refVol, evalOnRef, max };
     if (resetCursor || !sameGrid) cursor = argmax(refVol);
+    if (!sameGrid) {
+      for (const k of Object.keys(views) as Plane[]) views[k] = FULL_VIEW;
+      applyView();
+    }
   } else {
     display = null;
   }
@@ -1083,6 +1152,7 @@ pdfBtn.addEventListener('click', async () => {
       ref: { set: sides.ref.selected, scale: scaleOf(sides.ref), plan: planOf(sides.ref) },
       ev: { set: sides.eval.selected, scale: scaleOf(sides.eval), plan: planOf(sides.eval) },
       displayMax: display.max,
+      doseWindow: doseWindow(),
       shift: shiftOf(),
       levels: levelsOf(),
       comparison: results.length > 1 ? results.map((r, i) => ({ label: criteriaLabel(r.params), stats: resultStats[i], selected: r === result })) : null,
@@ -1113,6 +1183,7 @@ pdfBtn.addEventListener('click', async () => {
 onLangChange(() => {
   applyTranslations();
   localizeStatic();
+  applyView();
   savedGroup.label = m().presets.savedGroup;
   for (const side of Object.values(sides)) {
     if (side.fileCount) renderSide(side);

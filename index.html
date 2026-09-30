@@ -183,7 +183,17 @@
             <button data-bottom="hist" class="active" aria-pressed="true" data-i18n="viewer.histograms"></button>
             <button data-bottom="profile" aria-pressed="false" data-i18n="viewer.profiles"></button>
           </div>
-          <span class="hint" data-i18n="viewer.hint"></span>
+          <details class="window-menu">
+            <summary data-i18n="viewer.window" data-i18n-title="viewer.windowTitle"></summary>
+            <div class="menu">
+              <label><span data-i18n="viewer.windowMin"></span> <input type="number" id="win-min" value="0" step="any" /></label>
+              <label><span data-i18n="viewer.windowMax"></span> <input type="number" id="win-max" step="any" data-i18n-placeholder="viewer.windowAuto" /></label>
+              <label><span data-i18n="viewer.lowCut"></span> <input type="number" id="win-cut" value="0" min="0" max="100" step="any" /></label>
+              <button id="view-reset" data-i18n="viewer.resetView" data-i18n-title="viewer.resetViewTitle"></button>
+            </div>
+          </details>
+          <button id="zoom-reset" class="zoom-chip" hidden data-i18n-title="viewer.zoomTitle"></button>
+          <span class="hint-icon" tabindex="0" role="img" data-i18n-title="viewer.hint" data-i18n-aria-label="viewer.hint">?</span>
           <span class="readout" id="readout"></span>
         </div>
 

@@ -89,9 +89,45 @@ export function fitRect(img: Pick<SliceImage, 'width' | 'height' | 'pixelW' | 'p
   return { x: (w - dw) / 2, y: (h - dh) / 2, w: dw, h: dh };
 }
 
+/** 拡大表示の状態。zoom は全体表示に対する倍率、center は表示の中心 (画像の幅・高さに対する割合 0–1) */
+export interface SliceView {
+  zoom: number;
+  center: [number, number];
+}
+
+export const FULL_VIEW: SliceView = { zoom: 1, center: [0.5, 0.5] };
+export const MAX_ZOOM = 16;
+
+/** 拡大表示を考慮した画像の配置 (CSS ピクセル)。キャンバスからはみ出すことがある */
+export function viewRect(img: Pick<SliceImage, 'width' | 'height' | 'pixelW' | 'pixelH'>, w: number, h: number, view: SliceView = FULL_VIEW) {
+  const base = fitRect(img, w, h);
+  const rw = base.w * view.zoom;
+  const rh = base.h * view.zoom;
+  return { x: w / 2 - view.center[0] * rw, y: h / 2 - view.center[1] * rh, w: rw, h: rh };
+}
+
+/** 倍率を f 倍にする。anchor (画像上の割合 0–1) の点が画面上で動かないように中心をずらす */
+export function zoomView(view: SliceView, f: number, anchor: [number, number]): SliceView {
+  const zoom = Math.max(1, Math.min(MAX_ZOOM, view.zoom * f));
+  if (zoom === 1) return FULL_VIEW;
+  const k = view.zoom / zoom;
+  return clampView({ zoom, center: [anchor[0] - (anchor[0] - view.center[0]) * k, anchor[1] - (anchor[1] - view.center[1]) * k] });
+}
+
+/** 中心を (du, dv) (画像の幅・高さに対する割合) だけずらす */
+export function panView(view: SliceView, du: number, dv: number): SliceView {
+  return view.zoom === 1 ? FULL_VIEW : clampView({ zoom: view.zoom, center: [view.center[0] + du, view.center[1] + dv] });
+}
+
+/** 画像の外を中心にしない (どこまで動かしても画像の一部は見えている) */
+function clampView(v: SliceView): SliceView {
+  const c = (x: number) => Math.max(0, Math.min(1, x));
+  return { zoom: v.zoom, center: [c(v.center[0]), c(v.center[1])] };
+}
+
 /**
  * 断面画像をキャンバスに描く (ピクセルは補間せず等倍ブロックで表示)。
- * cross が与えられればボクセル中心に十字線を描く。
+ * cross が与えられればボクセル中心に十字線を描く。view で拡大表示する (PDF は全体表示)。
  */
 export function drawSlice(
   ctx: CanvasRenderingContext2D,
@@ -100,12 +136,13 @@ export function drawSlice(
   h: number,
   cross: [number, number] | null,
   crossColor = 'rgba(255,255,255,0.55)',
+  view: SliceView = FULL_VIEW,
 ): void {
   const tmp = document.createElement('canvas');
   tmp.width = img.width;
   tmp.height = img.height;
   tmp.getContext('2d')!.putImageData(new ImageData(img.rgba, img.width, img.height), 0, 0);
-  const r = fitRect(img, w, h);
+  const r = viewRect(img, w, h, view);
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(tmp, r.x, r.y, r.w, r.h);
   if (cross) {
