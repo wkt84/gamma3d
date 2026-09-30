@@ -12,6 +12,12 @@ export interface Histogram {
   total: number;
 }
 
+/** 値の入るビン。-1: min 未満 (underflow)、nBins: 上限以上 (overflow) */
+export function binIndex(v: number, min: number, binWidth: number, nBins: number): number {
+  const b = Math.floor((v - min) / binWidth + 1e-9);
+  return b < 0 ? -1 : b >= nBins ? nBins : b;
+}
+
 export function histogram(values: Iterable<number>, min: number, binWidth: number, nBins: number): Histogram {
   const counts = new Array<number>(nBins).fill(0);
   let underflow = 0;
@@ -19,12 +25,30 @@ export function histogram(values: Iterable<number>, min: number, binWidth: numbe
   let total = 0;
   for (const v of values) {
     total++;
-    const b = Math.floor((v - min) / binWidth + 1e-9);
+    const b = binIndex(v, min, binWidth, nBins);
     if (b < 0) underflow++;
     else if (b >= nBins) overflow++;
     else counts[b]++;
   }
   return { min, binWidth, counts, underflow, overflow, total };
+}
+
+/**
+ * ヒストグラムの 1 つのビン (binIndex と同じ番号) に入る点の印 (1/0) と点数。
+ * values はヒストグラムを作った値の配列 (NaN は対象外)。点数はヒストグラムのそのビンの度数と一致する。
+ */
+export function binMask(values: ArrayLike<number>, h: Pick<Histogram, 'min' | 'binWidth' | 'counts'>, bin: number): { mask: Uint8Array; count: number } {
+  const mask = new Uint8Array(values.length);
+  const nBins = h.counts.length;
+  let count = 0;
+  for (let n = 0; n < values.length; n++) {
+    const v = values[n];
+    if (!Number.isNaN(v) && binIndex(v, h.min, h.binWidth, nBins) === bin) {
+      mask[n] = 1;
+      count++;
+    }
+  }
+  return { mask, count };
 }
 
 function* finite(a: Float32Array): Generator<number> {

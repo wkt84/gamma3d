@@ -476,3 +476,49 @@ test('Ctrl+ホイールで 3 パネルが同期してズームし、ドラッグ
   expect(download.suggestedFilename()).toMatch(/\.pdf$/);
   expect(errors).toEqual([]);
 });
+
+test('ヒストグラムのビンをクリックすると該当する点を断面上で強調し、スライス移動と解除ができる', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await load(page);
+  await analyze(page);
+  const pixels = (id: string) => page.locator(`${id} canvas`).evaluate((c: HTMLCanvasElement) => c.toDataURL());
+  const before = await pixels('#panel-map');
+
+  // γ ヒストグラムで度数のあるバーを右 (γ の大きい側) から探してクリックする
+  const box = (await page.locator('#chart-gamma canvas').boundingBox())!;
+  let clicked = false;
+  for (let f = 0.9; f > 0.1 && !clicked; f -= 0.02) {
+    await page.mouse.move(box.x + box.width * f, box.y + box.height * 0.7);
+    const tip = page.locator('#chart-gamma .tooltip');
+    if ((await tip.isVisible()) && !/: 0 点/.test((await tip.textContent()) ?? '')) {
+      await page.mouse.click(box.x + box.width * f, box.y + box.height * 0.7);
+      clicked = true;
+    }
+  }
+  expect(clicked).toBe(true);
+  const bar = page.locator('#chart-gamma .selection-bar');
+  await expect(bar).toBeVisible();
+  await expect(bar.locator('.text')).toHaveText(/^γ .+: [\d,]+ 点 \(表示中のスライス [\d,]+ 点\)$/);
+  expect(await pixels('#panel-map')).not.toBe(before);
+
+  // 次の該当スライスへ移動すると、そのスライスに該当点がある
+  const next = bar.locator('button').nth(1);
+  if (await next.isEnabled()) {
+    const label = await sliceLabel(page).textContent();
+    await next.click();
+    await expect(sliceLabel(page)).not.toHaveText(label!);
+    await expect(bar.locator('.text')).not.toContainText('(表示中のスライス 0 点)');
+  }
+
+  // 同じバーをもう一度クリックするか Esc で解除
+  await page.keyboard.press('Escape');
+  await expect(bar).toHaveCount(0);
+  // 別のヒストグラム (DD) で選ぶと、帯はそちらへ移る
+  const ddBox = (await page.locator('#chart-dd canvas').boundingBox())!;
+  await page.mouse.click(ddBox.x + ddBox.width * 0.5, ddBox.y + ddBox.height * 0.7);
+  await expect(page.locator('#chart-dd .selection-bar .text')).toHaveText(/^DD .+%: /);
+  await page.mouse.click(ddBox.x + ddBox.width * 0.5, ddBox.y + ddBox.height * 0.7);
+  await expect(page.locator('.selection-bar')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

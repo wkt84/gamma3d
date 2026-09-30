@@ -182,6 +182,15 @@ export const en: Messages = {
     empty: 'Shown after the reference RTDOSE is loaded',
   },
 
+  selection: {
+    clickToSelect: 'Click to highlight these points on the slices',
+    clickToClear: 'Click to clear the highlight',
+    summary: (what: S, n: S, inSlice: S) => `${what}: ${n} points (${inSlice} on this slice)`,
+    prev: 'Previous slice with highlighted points',
+    next: 'Next slice with highlighted points',
+    clear: 'Clear highlight (Esc)',
+  },
+
   judgment: {
     pass: 'Pass',
     review: 'Review',

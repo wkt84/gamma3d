@@ -177,6 +177,15 @@ export const ja = {
     empty: '比較元の RTDOSE を読み込むと表示されます',
   },
 
+  selection: {
+    clickToSelect: 'クリックで該当する点を断面上で強調',
+    clickToClear: 'クリックで強調を解除',
+    summary: (what: S, n: S, inSlice: S) => `${what}: ${n} 点 (表示中のスライス ${inSlice} 点)`,
+    prev: '該当する点のある前のスライスへ',
+    next: '該当する点のある次のスライスへ',
+    clear: '強調を解除 (Esc)',
+  },
+
   judgment: {
     pass: '合格',
     review: '要確認',
