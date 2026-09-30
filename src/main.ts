@@ -5,7 +5,8 @@ import { AnalysisCancelled, runAnalyses, type AnalysisResult } from './core/runn
 import { gammaStats, type GammaStats } from './core/stats.ts';
 import { maxValue, resampleTo, shiftVolume, type Vec3, type Volume } from './core/volume.ts';
 import { buildDoseSets, scaled, scaleFactor, type DoseScale, type DoseSet } from './dicom/group.ts';
-import { isRtDose, parseRtDose, type RtDose } from './dicom/rtdose.ts';
+import { parseRtDose, peekModality, type RtDose } from './dicom/rtdose.ts';
+import { parseRtPlan, type RtPlan } from './dicom/rtplan.ts';
 import { ddColorMap, doseColorMap, dtaColorMap, gammaColorMap, gradientColorMap, type ColorMap } from './ui/colormap.ts';
 import { HistogramView, SlicePanel } from './ui/components.ts';
 import { derive, histSpecs, type DdUnit, type Derived } from './ui/results.ts';
@@ -32,6 +33,8 @@ interface Side {
   selected: DoseSet | null;
   notices: Msg[];
   fileCount: number;
+  /** 一緒に読み込んだ RTPLAN (分割回数の換算とビーム名の表示に使う) */
+  plans: RtPlan[];
 }
 
 type MapMode = 'gamma' | 'dd' | 'dta' | 'grad';
@@ -40,8 +43,8 @@ const $ = <T extends HTMLElement>(sel: string, root: ParentNode = document) => r
 const $$ = <T extends HTMLElement>(sel: string, root: ParentNode = document) => [...root.querySelectorAll(sel)] as T[];
 
 const sides: Record<SideKey, Side> = {
-  ref: { key: 'ref', root: $('[data-side="ref"]'), doses: [], sets: [], selected: null, notices: [], fileCount: 0 },
-  eval: { key: 'eval', root: $('[data-side="eval"]'), doses: [], sets: [], selected: null, notices: [], fileCount: 0 },
+  ref: { key: 'ref', root: $('[data-side="ref"]'), doses: [], sets: [], selected: null, notices: [], fileCount: 0, plans: [] },
+  eval: { key: 'eval', root: $('[data-side="eval"]'), doses: [], sets: [], selected: null, notices: [], fileCount: 0, plans: [] },
 };
 
 let plane: Plane = 'axial';
@@ -257,6 +260,7 @@ async function loadFiles(side: Side, files: File[]): Promise<void> {
   const summary = $('.set-summary', side.root);
   $('.dose-info', side.root).hidden = false;
   const doses: RtDose[] = [];
+  const plans: RtPlan[] = [];
   const notices: Msg[] = [];
   let skipped = 0;
   const candidates = files.filter((f) => !f.name.startsWith('.'));
@@ -265,13 +269,11 @@ async function loadFiles(side: Side, files: File[]): Promise<void> {
     summary.textContent = m().side.loading(i + 1, candidates.length);
     const name = f.webkitRelativePath || f.name;
     try {
-      // 先頭だけで Modality を判定し、CT など RTDOSE 以外は本体を読まない
-      const head = new Uint8Array(await f.slice(0, 65536).arrayBuffer());
-      if (!isRtDose(head)) {
-        skipped++;
-        continue;
-      }
-      doses.push(parseRtDose(await f.arrayBuffer(), name));
+      // 先頭だけで Modality を判定し、CT など RTDOSE / RTPLAN 以外は本体を読まない
+      const modality = peekModality(new Uint8Array(await f.slice(0, 65536).arrayBuffer()));
+      if (modality === 'RTDOSE') doses.push(parseRtDose(await f.arrayBuffer(), name));
+      else if (modality === 'RTPLAN') plans.push(parseRtPlan(await f.arrayBuffer(), name));
+      else skipped++;
     } catch (e) {
       notices.push(e instanceof Error ? errorMsg(e) : (t) => t.side.loadFailed(name));
     }
@@ -280,6 +282,7 @@ async function loadFiles(side: Side, files: File[]): Promise<void> {
   if (!doses.length) notices.push((t) => t.side.noRtdose);
 
   side.doses = doses;
+  side.plans = plans;
   side.fileCount = candidates.length;
   side.sets = buildDoseSets(doses);
   side.selected = side.sets[0] ?? null;
@@ -297,23 +300,50 @@ function renderSide(side: Side): void {
   const s = side.selected;
   $('.set-summary', side.root).textContent = s ? `${s.patientName || m().side.noName} / ${s.patientId || '–'}\n${text(s.summary)}` : '';
   $('.set-summary', side.root).style.whiteSpace = 'pre-line';
+  // 選択中の線量が参照するプラン
+  const plan = planOf(side);
+  const planInfo = $('.plan-info', side.root);
+  planInfo.hidden = !plan;
+  planInfo.textContent = plan ? m().side.plan(plan.label || plan.name || plan.fileName, plan.fractions, plan.beams.length) : '';
+  const perFraction = $<HTMLButtonElement>('.per-fraction', side.root);
+  perFraction.hidden = !plan?.fractions || plan.fractions < 2;
+  if (plan?.fractions) perFraction.textContent = m().side.perFraction(plan.fractions);
+
   const list = $('.file-list', side.root);
-  $('summary', list).textContent = m().side.fileCount(side.doses.length, side.fileCount);
+  $('summary', list).textContent = m().side.fileCount(side.doses.length, side.plans.length, side.fileCount);
+  // ビーム番号に、対応する RTPLAN のビーム名と MU を添える
+  const planBeams = (d: RtDose) => side.plans.find((p) => p.sopInstanceUID === d.referencedPlanUID)?.beams ?? [];
+  const beamName = (d: RtDose, n: number) => {
+    const b = planBeams(d).find((pb) => pb.number === n);
+    return b ? m().side.beam(n, b.name, b.meterset === null ? null : b.meterset.toFixed(1)) : `#${n}`;
+  };
   $('ul', list).replaceChildren(
     ...side.doses.map((d) => {
       const li = document.createElement('li');
-      const beams = d.referencedBeamNumbers.length ? ` #${d.referencedBeamNumbers.join(',')}` : '';
+      const beams = d.referencedBeamNumbers.length ? ` ${d.referencedBeamNumbers.map((n) => beamName(d, n)).join(', ')}` : '';
       li.textContent = `${d.fileName} (${d.summationType}${beams})`;
       return li;
     }),
+    ...side.plans.map((p) => {
+      const li = document.createElement('li');
+      li.textContent = `${p.fileName} (RTPLAN ${p.label || p.name})`;
+      return li;
+    }),
   );
+  const planNotices: Msg[] = side.plans.length && s && !plan ? [(t) => t.side.planMismatch] : [];
   $('.warnings', side.root).replaceChildren(
-    ...[...side.notices, ...(s?.warnings ?? [])].map((w) => {
+    ...[...side.notices, ...(s?.warnings ?? []), ...planNotices].map((w) => {
       const li = document.createElement('li');
       li.textContent = text(w);
       return li;
     }),
   );
+}
+
+/** 選択中の線量が参照する RTPLAN (読み込んでいなければ null) */
+function planOf(side: Side): RtPlan | null {
+  const uid = side.selected?.planUID;
+  return (uid && side.plans.find((p) => p.sopInstanceUID === uid)) || null;
 }
 
 /** 係数 x / y を読む。不正な値の欄は赤枠にし、その欄は 1 として扱う */
@@ -439,6 +469,14 @@ for (const side of Object.values(sides)) {
   for (const sel of ['.scale-num', '.scale-den']) {
     $<HTMLInputElement>(sel, side.root).addEventListener('change', () => onDataChanged(false));
   }
+  // 分割回数で割って 1 回分にする (係数 1 / n)
+  $('.per-fraction', side.root).addEventListener('click', () => {
+    const n = planOf(side)?.fractions;
+    if (!n) return;
+    $<HTMLInputElement>('.scale-num', side.root).value = '1';
+    $<HTMLInputElement>('.scale-den', side.root).value = String(n);
+    onDataChanged(false);
+  });
 }
 
 for (const input of shiftInputs) input.addEventListener('change', () => onDataChanged(false));
@@ -457,6 +495,7 @@ swapBtn.addEventListener('click', () => {
   [a.selected, b.selected] = [b.selected, a.selected];
   [a.notices, b.notices] = [b.notices, a.notices];
   [a.fileCount, b.fileCount] = [b.fileCount, a.fileCount];
+  [a.plans, b.plans] = [b.plans, a.plans];
   for (const sel of ['.scale-num', '.scale-den']) {
     const x = $<HTMLInputElement>(sel, a.root);
     const y = $<HTMLInputElement>(sel, b.root);
@@ -922,8 +961,8 @@ pdfBtn.addEventListener('click', async () => {
       result,
       derived,
       ddUnit,
-      ref: { set: sides.ref.selected, scale: scaleOf(sides.ref) },
-      ev: { set: sides.eval.selected, scale: scaleOf(sides.eval) },
+      ref: { set: sides.ref.selected, scale: scaleOf(sides.ref), plan: planOf(sides.ref) },
+      ev: { set: sides.eval.selected, scale: scaleOf(sides.eval), plan: planOf(sides.eval) },
       displayMax: display.max,
       shift: shiftOf(),
       levels: levelsOf(),

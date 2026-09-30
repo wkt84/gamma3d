@@ -114,6 +114,7 @@ export function writeRtDose(s: RtDoseSpec): Uint8Array {
       : [];
 
   const body = concat([
+    text(0x00080005, 'CS', 'ISO_IR 192'),
     text(0x00080016, 'UI', RT_DOSE_CLASS),
     text(0x00080018, 'UI', s.sopUID),
     text(0x00080060, 'CS', 'RTDOSE'),
@@ -145,15 +146,74 @@ export function writeRtDose(s: RtDoseSpec): Uint8Array {
     el(0x7fe00010, 'OW', new Uint8Array(px.buffer)),
   ]);
 
+  return part10(RT_DOSE_CLASS, s.sopUID, body);
+}
+
+/** プリアンブル・ファイルメタ情報を付けて DICOM ファイルにする */
+function part10(sopClass: string, sopUID: string, body: Uint8Array): Uint8Array {
   const metaBody = concat([
     el(0x00020001, 'OB', new Uint8Array([0, 1])),
-    text(0x00020002, 'UI', RT_DOSE_CLASS),
-    text(0x00020003, 'UI', s.sopUID),
+    text(0x00020002, 'UI', sopClass),
+    text(0x00020003, 'UI', sopUID),
     text(0x00020010, 'UI', EXPLICIT_LE),
     text(0x00020012, 'UI', '2.25.1234567890'),
   ]);
   const groupLen = new Uint8Array(4);
   new DataView(groupLen.buffer).setUint32(0, metaBody.length, true);
-
   return concat([new Uint8Array(128), enc.encode('DICM'), el(0x00020000, 'UL', groupLen), metaBody, body]);
+}
+
+export interface RtPlanSpec {
+  sopUID: string;
+  label: string;
+  name: string;
+  /** null なら NumberOfFractionsPlanned を書かない */
+  fractions: number | null;
+  beams: { number: number; name: string; meterset: number }[];
+  patientName: string;
+  patientId: string;
+  studyUID: string;
+  seriesUID: string;
+  forUID: string;
+}
+
+/** テスト・サンプル用の最小限の RTPLAN */
+export function writeRtPlan(s: RtPlanSpec): Uint8Array {
+  const fractionGroup = concat([
+    text(0x300a0071, 'IS', '1'),
+    ...(s.fractions !== null ? [text(0x300a0078, 'IS', String(s.fractions))] : []),
+    text(0x300a0080, 'IS', String(s.beams.length)),
+    seq(
+      0x300c0004,
+      s.beams.map((b) => concat([text(0x300a0086, 'DS', ds(b.meterset)), text(0x300c0006, 'IS', String(b.number))])),
+    ),
+  ]);
+  const body = concat([
+    text(0x00080005, 'CS', 'ISO_IR 192'),
+    text(0x00080016, 'UI', RT_PLAN_CLASS),
+    text(0x00080018, 'UI', s.sopUID),
+    text(0x00080060, 'CS', 'RTPLAN'),
+    text(0x00080070, 'LO', 'gamma3d-sample'),
+    text(0x00100010, 'PN', s.patientName),
+    text(0x00100020, 'LO', s.patientId),
+    text(0x0020000d, 'UI', s.studyUID),
+    text(0x0020000e, 'UI', s.seriesUID),
+    text(0x00200052, 'UI', s.forUID),
+    text(0x300a0002, 'SH', s.label),
+    text(0x300a0003, 'LO', s.name),
+    seq(0x300a0070, [fractionGroup]),
+    seq(
+      0x300a00b0,
+      s.beams.map((b) =>
+        concat([
+          text(0x300a00b2, 'SH', 'LINAC1'),
+          text(0x300a00c0, 'IS', String(b.number)),
+          text(0x300a00c2, 'LO', b.name),
+          text(0x300a00c6, 'CS', 'PHOTON'),
+          text(0x300a00ce, 'CS', 'TREATMENT'),
+        ]),
+      ),
+    ),
+  ]);
+  return part10(RT_PLAN_CLASS, s.sopUID, body);
 }
