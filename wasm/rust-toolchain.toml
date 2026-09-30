@@ -1,0 +1,5 @@
+# ビルド済みの .wasm を CI で再現できるよう、ツールチェーンを固定する
+[toolchain]
+channel = "1.95.0"
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"

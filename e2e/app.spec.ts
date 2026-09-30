@@ -185,3 +185,19 @@ test('比較元と比較先を入れ替えると、線量・係数が入れ替�
   await expect(page.locator('[data-side="ref"] .set-select')).toContainText('PLAN');
   await expect(page.locator('[data-side="eval"] .set-select')).toContainText('BEAM 合算 ×2');
 });
+
+test('既定では WebAssembly で計算し、?engine=ts (TypeScript 版) と同じ結果になる', async ({ page }) => {
+  const summary = async () => (await page.locator('.stat').allTextContents()).join(' | ');
+  await load(page);
+  await analyze(page);
+  await expect(page.locator('#run-status')).toContainText('WebAssembly');
+  const wasm = await summary();
+
+  await page.goto('/?engine=ts');
+  await page.locator('[data-side="ref"] .file-input').setInputFiles(REF);
+  await page.locator('[data-side="eval"] .file-input').setInputFiles(EVAL);
+  await expect(page.locator('#run')).toBeEnabled();
+  await analyze(page);
+  await expect(page.locator('#run-status')).toContainText('TypeScript');
+  expect(await summary()).toBe(wasm);
+});

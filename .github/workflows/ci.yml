@@ -48,3 +48,16 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+
+  wasm:
+    name: WASM build is reproducible
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: package.json
+      # wasm/rust-toolchain.toml のバージョン (と wasm32 ターゲット) を rustup が自動で入れる
+      - run: npm run build:wasm
+      # コミット済みの src/wasm/gamma3d_kernel.wasm がソースから再現できることを確かめる
+      - run: git diff --exit-code --stat src/wasm/gamma3d_kernel.wasm

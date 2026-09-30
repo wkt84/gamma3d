@@ -1,0 +1,18 @@
+[package]
+name = "gamma3d-kernel"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "Gamma search kernel for Gamma3D (WebAssembly)"
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = false
