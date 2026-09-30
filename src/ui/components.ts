@@ -1,6 +1,7 @@
 import type { ColorMap } from './colormap.ts';
 import { drawHistogram, themeFromCss, type BarHit, type HistSpec } from './histogram-chart.ts';
 import { drawSlice, fitRect, type SliceImage } from './slice.ts';
+import { m } from '../i18n/index.ts';
 
 function setupCanvas(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext2D; w: number; h: number } | null {
   const w = canvas.clientWidth;
@@ -207,7 +208,7 @@ export class HistogramView {
     }
     const h = this.hits[best];
     this.tip.hidden = false;
-    this.tip.textContent = `${h.label}: ${h.count.toLocaleString()} 点 (${h.percent.toFixed(2)}%)`;
+    this.tip.textContent = m().viewer.tooltip(h.label, h.count.toLocaleString(), h.percent.toFixed(2));
     const tw = this.tip.offsetWidth;
     const left = Math.min(rect.width - tw - 4, Math.max(4, h.x + h.w / 2 - tw / 2));
     this.tip.style.left = `${left}px`;

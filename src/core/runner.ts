@@ -1,5 +1,6 @@
 import { buildSearchOffsets, type AnalysisParams } from './gamma.ts';
 import type { Volume } from './volume.ts';
+import { LocalizedError, m } from '../i18n/index.ts';
 import type { FromWorker, ToWorker } from '../worker/protocol.ts';
 
 export interface AnalysisResult {
@@ -16,9 +17,9 @@ export interface AnalysisResult {
   searchPoints: number;
 }
 
-export class AnalysisCancelled extends Error {
+export class AnalysisCancelled extends LocalizedError {
   constructor() {
-    super('解析を中止しました');
+    super((t) => t.run.cancelled);
   }
 }
 
@@ -115,7 +116,7 @@ export function runAnalysis(
         if (done === jobs.length) finish();
         else dispatch(w);
       };
-      w.onerror = (e) => finish(new Error(e.message || 'Worker でエラーが発生しました'));
+      w.onerror = (e) => finish(new Error(e.message || m().run.workerError));
       w.postMessage({ type: 'init', ref, ev, params, offsets } satisfies ToWorker);
       dispatch(w);
     }

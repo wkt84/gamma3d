@@ -1,10 +1,11 @@
 import { resampleTo, sameGeometry, maxValue, type Volume } from '../core/volume.ts';
+import type { Msg } from '../i18n/index.ts';
 import type { RtDose } from './rtdose.ts';
 
 /** 解析に使える線量の候補 (単一の PLAN 線量、または BEAM 線量の合算)。 */
 export interface DoseSet {
   id: string;
-  label: string;
+  label: Msg;
   kind: 'PLAN' | 'BEAM_SUM' | 'OTHER';
   doses: RtDose[];
   volume: Volume;
@@ -13,25 +14,29 @@ export interface DoseSet {
   patientName: string;
   patientId: string;
   frameOfReferenceUID: string;
-  summary: string;
-  warnings: string[];
+  summary: Msg;
+  warnings: Msg[];
 }
 
-function short(uid: string | null): string {
-  if (!uid) return '参照プランなし';
-  return uid.length > 16 ? '…' + uid.slice(-12) : uid;
+function short(uid: string | null): Msg {
+  if (!uid) return (m) => m.doseSet.noPlan;
+  const s = uid.length > 16 ? '…' + uid.slice(-12) : uid;
+  return () => s;
 }
 
 function describe(d: RtDose): string {
   return d.seriesDescription || d.fileName;
 }
 
-function makeSet(id: string, label: string, kind: DoseSet['kind'], doses: RtDose[], volume: Volume, warnings: string[]): DoseSet {
+function makeSet(id: string, label: Msg, kind: DoseSet['kind'], doses: RtDose[], volume: Volume, warnings: Msg[]): DoseSet {
   const first = doses[0];
   const [nx, ny, nz] = volume.dims;
   const [sx, sy, sz] = volume.spacing;
-  const allWarnings = [...new Set([...doses.flatMap((d) => d.warnings.map((w) => `${d.fileName}: ${w}`)), ...warnings])];
+  const allWarnings: Msg[] = [...doses.flatMap((d) => d.warnings.map((w): Msg => (m) => m.dicom.fileWarning(d.fileName, w(m)))), ...warnings];
   const maxDose = maxValue(volume.data);
+  const dims = `${nx}×${ny}×${nz}`;
+  const spacing = `${sx.toFixed(2)}×${sy.toFixed(2)}×${sz.toFixed(2)}`;
+  const max = maxDose.toFixed(3);
   return {
     id,
     label,
@@ -43,28 +48,28 @@ function makeSet(id: string, label: string, kind: DoseSet['kind'], doses: RtDose
     patientName: first.patientName,
     patientId: first.patientId,
     frameOfReferenceUID: first.frameOfReferenceUID,
-    summary: `${nx}×${ny}×${nz} / ${sx.toFixed(2)}×${sy.toFixed(2)}×${sz.toFixed(2)} mm / 最大 ${maxDose.toFixed(3)} Gy`,
+    summary: (m) => m.doseSet.summary(dims, spacing, max),
     warnings: allWarnings,
   };
 }
 
 /** BEAM 線量を合算する。格子が異なるものは先頭の格子へ補間する。 */
-export function sumDoses(doses: RtDose[]): { volume: Volume; warnings: string[] } {
+export function sumDoses(doses: RtDose[]): { volume: Volume; warnings: Msg[] } {
   const base = doses[0].volume;
   const out = new Float32Array(base.data.length);
-  const warnings: string[] = [];
+  const warnings: Msg[] = [];
   for (const d of doses) {
     let v = d.volume;
     if (!sameGeometry(base, v)) {
       v = resampleTo(v, base, 0);
-      warnings.push(`${d.fileName}: 格子が異なるため先頭ビームの格子へ補間して合算しました`);
+      warnings.push((m) => m.doseSet.gridResampled(d.fileName));
     }
     for (let n = 0; n < out.length; n++) out[n] += v.data[n];
   }
   const units = new Set(doses.map((d) => d.doseUnits));
-  if (units.size > 1) warnings.push(`線量単位が混在しています (${[...units].join(', ')})`);
+  if (units.size > 1) warnings.push((m) => m.doseSet.unitsMixed([...units].join(', ')));
   const frs = new Set(doses.map((d) => d.frameOfReferenceUID));
-  if (frs.size > 1) warnings.push('FrameOfReferenceUID の異なる線量が混在しています');
+  if (frs.size > 1) warnings.push((m) => m.doseSet.frameOfReferenceMixed);
   return { volume: { dims: [...base.dims], spacing: [...base.spacing], origin: [...base.origin], data: out }, warnings };
 }
 
@@ -90,20 +95,24 @@ export function buildDoseSets(doses: RtDose[]): DoseSet[] {
 
     for (const d of others) {
       const kind = d.summationType === 'PLAN' ? 'PLAN' : 'OTHER';
-      sets.push(makeSet(`${key}:${d.sopInstanceUID || d.fileName}`, `${d.summationType}: ${describe(d)} (${short(planUID)})`, kind, [d], d.volume, []));
+      const plan = short(planUID);
+      const label: Msg = (m) => m.doseSet.label(d.summationType, describe(d), plan(m));
+      sets.push(makeSet(`${key}:${d.sopInstanceUID || d.fileName}`, label, kind, [d], d.volume, []));
     }
 
     if (beams.length > 0) {
       beams.sort((a, b) => (a.referencedBeamNumbers[0] ?? 0) - (b.referencedBeamNumbers[0] ?? 0));
-      const warnings: string[] = [];
+      const warnings: Msg[] = [];
       const nums = beams.flatMap((b) => b.referencedBeamNumbers);
       const dup = nums.filter((n, i) => nums.indexOf(n) !== i);
-      if (dup.length) warnings.push(`同じビーム番号が複数あります (${[...new Set(dup)].join(', ')})`);
+      if (dup.length) warnings.push((m) => m.doseSet.duplicateBeams([...new Set(dup)].join(', ')));
       const uids = beams.map((b) => b.sopInstanceUID).filter(Boolean);
-      if (new Set(uids).size !== uids.length) warnings.push('同一の SOPInstanceUID のファイルが重複しています');
+      if (new Set(uids).size !== uids.length) warnings.push((m) => m.doseSet.duplicateInstances);
       const { volume, warnings: w } = beams.length === 1 ? { volume: beams[0].volume, warnings: [] } : sumDoses(beams);
       warnings.push(...w);
-      sets.push(makeSet(`${key}:beam-sum`, `BEAM 合算 ×${beams.length} (${short(planUID)})`, 'BEAM_SUM', beams, volume, warnings));
+      const plan = short(planUID);
+      const n = beams.length;
+      sets.push(makeSet(`${key}:beam-sum`, (m) => m.doseSet.beamSum(n, plan(m)), 'BEAM_SUM', beams, volume, warnings));
     }
   }
 

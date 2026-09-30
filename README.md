@@ -68,6 +68,7 @@ src/
   worker/    gamma.worker.ts
   ui/        断面描画・カラーマップ・ヒストグラム・パネル部品
   report/    pdf.ts (jsPDF。フォントは PDF 出力時に遅延読み込み)
+  i18n/      ja.ts (UI と PDF の文言の辞書)、index.ts (辞書の切り替えと、HTML の data-i18n 属性への適用)
 scripts/     dicom-writer.ts (テスト・サンプル用の RTDOSE 書き出し), gen-samples.ts
 public/fonts Noto Sans JP (SIL Open Font License、OFL.txt 同梱)
 ```
