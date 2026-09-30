@@ -150,6 +150,16 @@ function clampView(v: SliceView): SliceView {
 }
 
 /**
+ * プロファイル上のホバー位置を断面に示す印。uv は画像上のボクセル位置。
+ * onSlice が false なら、その点は表示中のスライスにない (断面に垂直な方向のプロファイル) ので、
+ * 投影した位置に中抜きの印を描く。
+ */
+export interface SliceMarker {
+  uv: [number, number];
+  onSlice: boolean;
+}
+
+/**
  * 断面画像をキャンバスに描く (ピクセルは補間せず等倍ブロックで表示)。
  * cross が与えられればボクセル中心に十字線を描く。view で拡大表示する (PDF は全体表示)。
  */
@@ -162,6 +172,7 @@ export function drawSlice(
   crossColor = 'rgba(255,255,255,0.55)',
   view: SliceView = FULL_VIEW,
   overlay: SliceImage | null = null,
+  marker: SliceMarker | null = null,
 ): void {
   const r = viewRect(img, w, h, view);
   ctx.imageSmoothingEnabled = false;
@@ -185,6 +196,29 @@ export function drawSlice(
     ctx.moveTo(Math.round(cx) + 0.5, r.y);
     ctx.lineTo(Math.round(cx) + 0.5, r.y + r.h);
     ctx.stroke();
+    ctx.restore();
+  }
+  if (marker) {
+    // どのカラーマップの上でも見えるよう、白の印を暗い縁で囲む
+    const mx = r.x + ((marker.uv[0] + 0.5) / img.width) * r.w;
+    const my = r.y + ((marker.uv[1] + 0.5) / img.height) * r.h;
+    const radius = Math.max(5, Math.min(12, (r.w / img.width) * 0.6));
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(mx, my, radius, 0, 2 * Math.PI);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+    ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#ffffff';
+    if (!marker.onSlice) ctx.setLineDash([3, 2]);
+    ctx.stroke();
+    if (marker.onSlice) {
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(mx, my, 2, 0, 2 * Math.PI);
+      ctx.fill();
+    }
     ctx.restore();
   }
 }

@@ -447,6 +447,19 @@ profiles.forEach((view, axis) => {
     if (spec.gamma) parts.push(`γ ${f(spec.gamma.values[i], 2)}`);
     return parts.join(m().viewer.separator);
   };
+  // ホバー中の点を断面にも印で示し、値表示もその点にする
+  view.onHover = (i) => {
+    if (!display || i === null) {
+      panels.forEach((p) => p.setMarker(null));
+      showReadout(cursor);
+      return;
+    }
+    const ijk: Ijk = [...cursor];
+    ijk[axis] = i;
+    const marker = { uv: voxelToImage(plane, display.ref, ijk), onSlice: PLANES[plane].w !== axis || i === cursor[axis] };
+    panels.forEach((p) => p.setMarker(marker));
+    showReadout(ijk);
+  };
   view.onPick = (i) => {
     if (!display) return;
     cursor[axis] = i;

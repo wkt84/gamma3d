@@ -1,7 +1,7 @@
 import type { ColorMap } from './colormap.ts';
 import { drawHistogram, themeFromCss, type BarHit, type HistSpec } from './histogram-chart.ts';
 import { drawProfile, type ProfileGeometry, type ProfileSpec } from './profile-chart.ts';
-import { drawSlice, FULL_VIEW, viewRect, type SliceImage, type SliceView } from './slice.ts';
+import { drawSlice, FULL_VIEW, viewRect, type SliceImage, type SliceMarker, type SliceView } from './slice.ts';
 import { m } from '../i18n/index.ts';
 
 function setupCanvas(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext2D; w: number; h: number } | null {
@@ -35,6 +35,7 @@ export class SlicePanel {
   private image: SliceImage | null = null;
   private cross: [number, number] | null = null;
   private overlay: SliceImage | null = null;
+  private marker: SliceMarker | null = null;
   private wheelAcc = 0;
   private view: SliceView = FULL_VIEW;
   private drag: { x: number; y: number; moved: boolean } | null = null;
@@ -135,6 +136,12 @@ export class SlicePanel {
     this.redraw();
   }
 
+  /** プロファイル上のホバー位置の印 (null で消す) */
+  setMarker(marker: SliceMarker | null): void {
+    this.marker = marker;
+    this.redraw();
+  }
+
   /** overlay: 強調表示の重ね画像 (ヒストグラムのビンを選んだとき) */
   show(image: SliceImage, cross: [number, number] | null, overlay: SliceImage | null = null): void {
     this.image = image;
@@ -178,7 +185,7 @@ export class SlicePanel {
     const c = setupCanvas(this.canvas);
     if (!c) return;
     c.ctx.clearRect(0, 0, c.w, c.h);
-    if (this.image) drawSlice(c.ctx, this.image, c.w, c.h, this.cross, undefined, this.view, this.overlay);
+    if (this.image) drawSlice(c.ctx, this.image, c.w, c.h, this.cross, undefined, this.view, this.overlay, this.marker);
   }
 
   /** 画像の配置 (キャンバス内の CSS ピクセル) */
@@ -322,6 +329,8 @@ export class ProfileView {
   /** ホバー中の点の説明 (ツールチップの文言) */
   describe: (spec: ProfileSpec, i: number) => string = () => '';
   onPick: (i: number) => void = () => {};
+  /** ホバー中の点が変わったとき (外れたら null) */
+  onHover: (i: number | null) => void = () => {};
 
   constructor(fig: HTMLElement, emptyText: string) {
     this.fig = fig;
@@ -337,6 +346,7 @@ export class ProfileView {
       this.hover = -1;
       this.tip.hidden = true;
       this.redraw();
+      this.onHover(null);
     });
     this.canvas.addEventListener('dblclick', (e) => {
       e.preventDefault();
@@ -381,6 +391,7 @@ export class ProfileView {
       if (this.hover !== -1) {
         this.hover = -1;
         this.redraw();
+        this.onHover(null);
       }
       return;
     }
@@ -394,6 +405,7 @@ export class ProfileView {
     if (this.hover !== i) {
       this.hover = i;
       this.redraw();
+      this.onHover(i);
     }
   }
 }
