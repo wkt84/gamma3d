@@ -160,3 +160,28 @@ test('解析条件をプリセットとして保存・呼び出し・書き出�
   await expect(status).toContainText('1 件を読み込みました');
   await expect(preset.locator('option[value="saved:施設標準"]')).toHaveCount(1);
 });
+
+test('比較元と比較先を入れ替えると、線量・係数が入れ替わり、解析結果は破棄される', async ({ page }) => {
+  await load(page);
+  await page.fill('[data-side="eval"] .scale-den', '1.01');
+  await page.press('[data-side="eval"] .scale-den', 'Tab');
+  await analyze(page);
+  await expect(page.locator('#pdf')).toBeEnabled();
+
+  await page.click('#swap');
+  await expect(page.locator('[data-side="ref"] .set-select')).toContainText('BEAM 合算 ×2');
+  await expect(page.locator('[data-side="eval"] .set-select')).toContainText('PLAN');
+  await expect(page.locator('[data-side="ref"] .scale-den')).toHaveValue('1.01');
+  await expect(page.locator('[data-side="eval"] .scale-den')).toHaveValue('1');
+  // 結果は破棄され、再解析できる
+  await expect(page.locator('#pdf')).toBeDisabled();
+  await expect(page.locator('#run-status')).toHaveText('');
+  await expect(page.locator('.stat')).toHaveCount(0);
+  await analyze(page);
+  await expect(page.locator('.stat')).toHaveCount(3);
+
+  // もう一度押すと元に戻る
+  await page.click('#swap');
+  await expect(page.locator('[data-side="ref"] .set-select')).toContainText('PLAN');
+  await expect(page.locator('[data-side="eval"] .set-select')).toContainText('BEAM 合算 ×2');
+});
