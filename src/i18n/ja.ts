@@ -34,6 +34,8 @@ export const ja = {
     skipped: (n: N) => `RTDOSE 以外の ${n} ファイルを無視しました`,
     noRtdose: 'RTDOSE が見つかりませんでした',
     noName: '(氏名なし)',
+    swap: '比較元と比較先を入れ替え',
+    swapTitle: '線量・警告・係数をまとめて入れ替えます (解析結果は破棄されます)',
     fileCount: (rtdose: N, total: N) => `RTDOSE ${rtdose} / ${total} ファイル`,
   },
 

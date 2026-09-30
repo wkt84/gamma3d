@@ -276,6 +276,7 @@ async function loadFiles(side: Side, files: File[]): Promise<void> {
 }
 
 function renderSide(side: Side): void {
+  $('.dose-info', side.root).hidden = side.fileCount === 0;
   const select = $<HTMLSelectElement>('.set-select', side.root);
   select.replaceChildren(...side.sets.map((s) => new Option(text(s.label), s.id)));
   select.disabled = side.sets.length < 2;
@@ -321,6 +322,7 @@ const factorOf = (side: Side): number => scaleFactor(scaleOf(side));
 
 /** データ・係数が変わったとき: 結果を破棄して表示を作り直す */
 function onDataChanged(resetCursor: boolean): void {
+  if (result) runStatus.textContent = '';
   result = null;
   derived = null;
   stale = false;
@@ -401,6 +403,26 @@ for (const side of Object.values(sides)) {
     $<HTMLInputElement>(sel, side.root).addEventListener('change', () => onDataChanged(false));
   }
 }
+
+/** 比較元と比較先を入れ替える (線量・候補・警告・係数)。解析結果は破棄する */
+const swapBtn = $<HTMLButtonElement>('#swap');
+swapBtn.addEventListener('click', () => {
+  const a = sides.ref;
+  const b = sides.eval;
+  [a.doses, b.doses] = [b.doses, a.doses];
+  [a.sets, b.sets] = [b.sets, a.sets];
+  [a.selected, b.selected] = [b.selected, a.selected];
+  [a.notices, b.notices] = [b.notices, a.notices];
+  [a.fileCount, b.fileCount] = [b.fileCount, a.fileCount];
+  for (const sel of ['.scale-num', '.scale-den']) {
+    const x = $<HTMLInputElement>(sel, a.root);
+    const y = $<HTMLInputElement>(sel, b.root);
+    [x.value, y.value] = [y.value, x.value];
+  }
+  renderSide(a);
+  renderSide(b);
+  onDataChanged(true);
+});
 
 // ───────── 解析条件 ─────────
 
@@ -614,6 +636,7 @@ const runStatus = $('#run-status');
 
 function updateButtons(): void {
   const running = !!abort;
+  swapBtn.disabled = running || (sides.ref.fileCount === 0 && sides.eval.fileCount === 0);
   runBtn.disabled = running || !display?.evalOnRef;
   cancelBtn.hidden = !running;
   pdfBtn.disabled = running || !result;

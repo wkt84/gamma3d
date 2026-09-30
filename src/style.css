@@ -236,6 +236,13 @@ textarea {
   color: var(--accent);
 }
 
+.swap {
+  align-self: center;
+  font-size: 12px;
+  padding: 4px 14px;
+  margin: -4px 0;
+}
+
 .dose-info {
   display: flex;
   flex-direction: column;
