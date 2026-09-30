@@ -224,3 +224,26 @@ test('比較先を平行移動 (手動シフト) すると結果に反映され�
   await page.click('[data-side="eval"] .shift-reset');
   await expect(x).toHaveValue('0');
 });
+
+test('判定基準 (許容・アクションレベル) で合否を表示し、変更は再解析なしで反映される', async ({ page }) => {
+  await load(page);
+  await analyze(page);
+  const badge = page.locator('.stat .judgment');
+  await expect(badge).toHaveClass(/pass/);
+  await expect(badge).toContainText('合格');
+  await expect(badge).toContainText('許容 95% / アクション 90%');
+
+  // 許容レベルを上げると要確認になる (結果は破棄されない)
+  await page.fill('#p-tol', '99.9');
+  await page.press('#p-tol', 'Tab');
+  await expect(badge).toHaveClass(/review/);
+  await expect(badge).toContainText('要確認');
+  await expect(page.locator('#pdf')).toBeEnabled();
+  await expect(page.locator('#run-status')).toContainText('完了');
+
+  // アクションレベル > 許容レベルは不正: 欄を赤枠にして判定は出さない
+  await page.fill('#p-act', '100');
+  await page.press('#p-act', 'Tab');
+  await expect(page.locator('#p-act')).toHaveAttribute('aria-invalid', 'true');
+  await expect(badge).toHaveCount(0);
+});

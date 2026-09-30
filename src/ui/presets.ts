@@ -1,3 +1,5 @@
+import { DEFAULT_LEVELS, validLevels } from '../core/judgment.ts';
+
 /**
  * 解析条件のプリセット (名前付きで保存した解析条件)。
  * ブラウザの localStorage に保存し、JSON ファイルで書き出し・読み込みできる。
@@ -19,6 +21,9 @@ export interface PresetParams {
   gradientThresholdPercentPerMm: number;
   gammaCap: number;
   stepsPerDta: number;
+  /** γ パス率の判定基準 (%)。これらを持たない以前のプリセットは既定値で補う */
+  toleranceLevel: number;
+  actionLevel: number;
 }
 
 export interface Preset {
@@ -38,6 +43,11 @@ const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
 export function validateParams(v: unknown): PresetParams | null {
   if (!v || typeof v !== 'object') return null;
   const o = v as Record<string, unknown>;
+  const levels = {
+    tolerance: o.toleranceLevel === undefined ? DEFAULT_LEVELS.tolerance : o.toleranceLevel,
+    action: o.actionLevel === undefined ? DEFAULT_LEVELS.action : o.actionLevel,
+  };
+  if (!isNum(levels.tolerance) || !isNum(levels.action) || !validLevels(levels as { tolerance: number; action: number })) return null;
   const ok =
     isNum(o.ddPercent) &&
     o.ddPercent > 0 &&
@@ -75,6 +85,8 @@ export function validateParams(v: unknown): PresetParams | null {
     gradientThresholdPercentPerMm: o.gradientThresholdPercentPerMm as number,
     gammaCap: o.gammaCap as number,
     stepsPerDta: o.stepsPerDta as number,
+    toleranceLevel: levels.tolerance,
+    actionLevel: levels.action,
   };
 }
 

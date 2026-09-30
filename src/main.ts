@@ -1,5 +1,6 @@
 import './style.css';
 import { DEFAULT_PARAMS, type AnalysisParams } from './core/gamma.ts';
+import { judge, validLevels, type ActionLevels, type Judgment } from './core/judgment.ts';
 import { AnalysisCancelled, runAnalysis, type AnalysisResult } from './core/runner.ts';
 import { maxValue, resampleTo, shiftVolume, type Vec3, type Volume } from './core/volume.ts';
 import { buildDoseSets, scaled, scaleFactor, type DoseScale, type DoseSet } from './dicom/group.ts';
@@ -495,7 +496,17 @@ function formValues(): PresetParams {
     gradientThresholdPercentPerMm: num('#p-grad'),
     gammaCap: num('#p-cap'),
     stepsPerDta: Math.round(num('#p-steps')),
+    toleranceLevel: num('#p-tol'),
+    actionLevel: num('#p-act'),
   };
+}
+
+/** 判定基準。不正なら欄を赤枠にして null */
+function levelsOf(): ActionLevels | null {
+  const l = { tolerance: num('#p-tol'), action: num('#p-act') };
+  const ok = validLevels(l);
+  for (const id of ['#p-tol', '#p-act']) $(id).setAttribute('aria-invalid', String(!ok));
+  return ok ? l : null;
 }
 
 /** 入力欄に条件を入れる */
@@ -512,6 +523,10 @@ function applyForm(p: PresetParams): void {
   set('#p-grad', p.gradientThresholdPercentPerMm);
   set('#p-cap', p.gammaCap);
   set('#p-steps', p.stepsPerDta);
+  set('#p-tol', p.toleranceLevel);
+  set('#p-act', p.actionLevel);
+  levelsOf();
+  renderSummary();
   updateNormDose();
   markStale();
 }
@@ -530,12 +545,13 @@ function checkForm(p: PresetParams, requireNormDose: boolean): void {
   bad(!(p.gradientThresholdPercentPerMm >= 0), e.gradient);
   bad(!(p.gammaCap >= 1 && p.gammaCap <= 3), e.cap);
   bad(!(p.stepsPerDta >= 2 && p.stepsPerDta <= 20), e.steps);
+  bad(!validLevels({ tolerance: p.toleranceLevel, action: p.actionLevel }), e.levels);
 }
 
 function readParams(): AnalysisParams {
   const f = formValues();
   checkForm(f, true);
-  const { normAuto: _auto, normDoseGy: _norm, ...rest } = f;
+  const { normAuto: _auto, normDoseGy: _norm, toleranceLevel: _tol, actionLevel: _act, ...rest } = f;
   return { ...DEFAULT_PARAMS, ...rest, normDoseGy: num('#p-normdose') };
 }
 
@@ -587,7 +603,9 @@ $$<HTMLInputElement>('.params input').forEach((i) => {
   i.addEventListener('input', syncPresetSelect);
   i.addEventListener('change', () => {
     syncPresetSelect();
-    markStale();
+    // 判定基準は計算に影響しないので、再解析せずに判定だけ更新する
+    if (i.classList.contains('level')) renderSummary();
+    else markStale();
   });
 });
 
@@ -733,6 +751,25 @@ function crossWarnings(): Msg[] {
   return out;
 }
 
+const JUDGMENT_ICON: Record<Judgment, string> = { pass: '✓', review: '!', fail: '✕' };
+
+/** 判定の表示 (色だけでなくアイコンと文字でも示す) */
+function judgmentBadge(j: Judgment, levels: ActionLevels): HTMLElement {
+  const b = document.createElement('span');
+  b.className = `judgment ${j}`;
+  const icon = document.createElement('span');
+  icon.className = 'icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = JUDGMENT_ICON[j];
+  const label = document.createElement('strong');
+  label.textContent = m().judgment[j];
+  const note = document.createElement('span');
+  note.className = 'note';
+  note.textContent = m().judgment.levels(levels.tolerance, levels.action);
+  b.append(icon, label, note);
+  return b;
+}
+
 function stat(label: string, value: string, sub: string, cls = ''): HTMLElement {
   const d = document.createElement('div');
   d.className = `stat ${cls}`;
@@ -758,12 +795,16 @@ function renderSummary(): void {
   if (result && derived) {
     const p = result.params;
     const g = derived.gamma;
+    const gammaTile = stat(
+      s.gammaLabel(p.ddPercent, p.dtaMm, p.local, p.gammaThresholdPercent),
+      `${f(g.passRate, 2)}%`,
+      s.gammaSub(g.evaluated.toLocaleString(), f(g.mean, 2), f(g.p99, 2), g.maxCapped ? `≥${p.gammaCap}` : f(g.max, 2)),
+    );
+    const levels = levelsOf();
+    const j = levels ? judge(g.passRate, levels) : null;
+    if (j && levels) gammaTile.querySelector('.value')!.after(judgmentBadge(j, levels));
     nodes.push(
-      stat(
-        s.gammaLabel(p.ddPercent, p.dtaMm, p.local, p.gammaThresholdPercent),
-        `${f(g.passRate, 2)}%`,
-        s.gammaSub(g.evaluated.toLocaleString(), f(g.mean, 2), f(g.p99, 2), g.maxCapped ? `≥${p.gammaCap}` : f(g.max, 2)),
-      ),
+      gammaTile,
       stat(
         s.ddLabel(p.ddPercent),
         `${f(derived.dd.passRate, 1)}%`,
@@ -815,6 +856,7 @@ pdfBtn.addEventListener('click', async () => {
       ev: { set: sides.eval.selected, scale: scaleOf(sides.eval) },
       displayMax: display.max,
       shift: shiftOf(),
+      levels: levelsOf(),
       warnings: [...crossWarnings(), ...sides.ref.selected.warnings, ...sides.eval.selected.warnings, ...(stale ? [(t: Messages) => t.report.staleWarning] : [])],
       cursor: [...cursor] as Ijk,
       includePatient: $<HTMLInputElement>('#r-patient').checked,

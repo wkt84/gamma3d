@@ -57,6 +57,9 @@ export const ja = {
     gradient: 'DTA 勾配閾値 (%/mm)',
     gradientTitle: 'DTA はこの勾配以上の点 (かつ γ 閾値以上) で評価します',
     ddLowGradient: 'DD を低勾配領域に限定',
+    tolerance: '許容レベル (%)',
+    action: 'アクションレベル (%)',
+    levelsTitle: 'γ パス率が許容レベル以上なら合格、アクションレベル以上なら要確認、それ未満なら不合格 (既定値は AAPM TG-218)',
     advanced: '詳細設定',
     cap: 'γ 上限',
     capTitle: '探索半径 = 上限 × DTA',
@@ -75,6 +78,7 @@ export const ja = {
       gradient: '勾配閾値は 0 以上で指定してください',
       cap: 'γ 上限は 1–3 で指定してください',
       steps: '探索分割数は 2–20 で指定してください',
+      levels: '判定基準は 0–100% で、アクションレベルを許容レベル以下にしてください',
     },
   },
 
@@ -142,6 +146,13 @@ export const ja = {
     histEmpty: { dd: '線量差ヒストグラム', dta: 'DTA ヒストグラム', gamma: 'ガンマヒストグラム' },
     tooltip: (label: S, count: S, percent: S) => `${label}: ${count} 点 (${percent}%)`,
     separator: '  ・  ',
+  },
+
+  judgment: {
+    pass: '合格',
+    review: '要確認',
+    fail: '不合格',
+    levels: (tolerance: N, action: N) => `許容 ${tolerance}% / アクション ${action}%`,
   },
 
   summary: {
@@ -248,6 +259,9 @@ export const ja = {
     gamma: 'ガンマ',
     ddBox: (dd: N) => `線量差 (±${dd}% 以内)`,
     dtaBox: (dta: N) => `DTA (≤ ${dta} mm)`,
+    judgment: '判定',
+    levels: '判定基準',
+    levelsValue: (tolerance: N, action: N) => `γ パス率 ≥ ${tolerance}% 合格 / ≥ ${action}% 要確認`,
     evaluated: '評価点数',
     meanMedian: '平均 / 中央値',
     p99: 'γ1% (99%値)',

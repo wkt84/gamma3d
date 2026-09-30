@@ -477,6 +477,43 @@ progress {
   font-variant-numeric: tabular-nums;
 }
 
+.judgment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin: 2px 0;
+}
+
+.judgment .icon {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.judgment.pass .icon {
+  background: var(--good);
+}
+
+.judgment.review .icon {
+  background: var(--warning);
+  color: #0b0b0b;
+}
+
+.judgment.fail .icon {
+  background: var(--critical);
+}
+
+.judgment .note {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .stat .sub {
   font-size: 11px;
   color: var(--text-muted);
