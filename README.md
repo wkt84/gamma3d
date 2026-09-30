@@ -48,9 +48,12 @@ npm install
 npm run gen:samples   # samples/ に合成 RTDOSE を作成 (比較元: PLAN、比較先: BEAM ×2、+1 mm ずれ・+1.5%・ホットスポット入り)
 npm run dev           # 開発サーバー
 npm test              # 単体テスト (Vitest)
+npm run test:e2e      # E2E テスト (Playwright。初回は npx playwright install chromium)
 npm run build         # 型チェック + dist/ へビルド
 npm run preview       # ビルド結果の確認
 ```
+
+GitHub Actions (`.github/workflows/ci.yml`) で、push と PR のたびに型チェック・単体テスト・ビルド・E2E テストを実行します。
 
 計算は Web Worker のプールで、スライス単位に並列実行します。COOP/COEP ヘッダー (`vite.config.ts` / `vercel.json`) で `crossOriginIsolated` にしてあり、線量配列は SharedArrayBuffer で Worker 間で共有します。
 
