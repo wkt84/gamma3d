@@ -1,4 +1,5 @@
 import type { Histogram } from '../core/stats.ts';
+import { m } from '../i18n/index.ts';
 
 export interface ChartTheme {
   surface: string;
@@ -102,8 +103,8 @@ export function drawHistogram(ctx: CanvasRenderingContext2D, w: number, h: numbe
   ctx.textAlign = 'left';
   let lx = 10;
   for (const [color, label] of [
-    [t.pass, '基準内'],
-    [t.fail, '基準外'],
+    [t.pass, m().hist.pass],
+    [t.fail, m().hist.fail],
   ]) {
     ctx.fillStyle = color;
     ctx.fillRect(lx, 25, 9, 9);

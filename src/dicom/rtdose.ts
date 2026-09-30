@@ -1,6 +1,7 @@
 import * as dicomParserNs from 'dicom-parser';
 import type { DataSet } from 'dicom-parser';
 import type { Volume } from '../core/volume.ts';
+import { LocalizedError, type Msg } from '../i18n/index.ts';
 
 // dicom-parser は UMD 配布のため、環境によって default 側に実体がある
 const dicomParser: typeof dicomParserNs =
@@ -24,13 +25,13 @@ export interface RtDose {
   referencedBeamNumbers: number[];
   instanceCreationDate: string;
   volume: Volume;
-  warnings: string[];
+  warnings: Msg[];
 }
 
 const TS_IMPLICIT_LE = '1.2.840.10008.1.2';
 const SUPPORTED_TS = new Set([TS_IMPLICIT_LE, '1.2.840.10008.1.2.1']);
 
-export class NotRtDoseError extends Error {}
+export class NotRtDoseError extends LocalizedError {}
 
 function parse(bytes: Uint8Array, untilTag?: string): DataSet {
   try {
@@ -61,21 +62,21 @@ export function isRtDose(bytes: Uint8Array): boolean {
 
 const str = (ds: DataSet, tag: string): string => (ds.string(tag) ?? '').trim();
 
-function numbers(ds: DataSet, tag: string): number[] {
+function numbers(ds: DataSet, tag: string, file: string): number[] {
   const n = ds.numStringValues(tag) ?? 0;
   const out: number[] = [];
-  for (let m = 0; m < n; m++) {
-    const v = ds.floatString(tag, m);
-    if (v === undefined || !Number.isFinite(v)) throw new Error(`タグ ${tag} の値が不正です`);
+  for (let k = 0; k < n; k++) {
+    const v = ds.floatString(tag, k);
+    if (v === undefined || !Number.isFinite(v)) throw new LocalizedError((m) => m.dicom.tagValue(file, tag));
     out.push(v);
   }
   return out;
 }
 
-function requireNumbers(ds: DataSet, tag: string, name: string, count?: number): number[] {
-  if (!ds.elements[tag]) throw new Error(`${name} (${tag}) がありません`);
-  const v = numbers(ds, tag);
-  if (count !== undefined && v.length !== count) throw new Error(`${name} の要素数が不正です (${v.length})`);
+function requireNumbers(ds: DataSet, tag: string, name: string, file: string, count?: number): number[] {
+  if (!ds.elements[tag]) throw new LocalizedError((m) => m.dicom.missingTag(file, name, tag));
+  const v = numbers(ds, tag, file);
+  if (count !== undefined && v.length !== count) throw new LocalizedError((m) => m.dicom.tagCount(file, name, v.length));
   return v;
 }
 
@@ -92,37 +93,37 @@ function axisOf(v: number[]): { axis: number; sign: number } | null {
 export function parseRtDose(buffer: ArrayBuffer, fileName: string): RtDose {
   const bytes = new Uint8Array(buffer);
   const ds = parse(bytes);
-  const warnings: string[] = [];
+  const warnings: Msg[] = [];
 
   const modality = str(ds, 'x00080060').toUpperCase();
-  if (modality !== 'RTDOSE') throw new NotRtDoseError(`${fileName}: RTDOSE ではありません (Modality=${modality || '不明'})`);
+  if (modality !== 'RTDOSE') throw new NotRtDoseError((m) => m.dicom.notRtdose(fileName, modality));
 
   const ts = str(ds, 'x00020010');
   if (ts && !SUPPORTED_TS.has(ts)) {
-    throw new Error(`${fileName}: 非対応の転送構文です (${ts})。非圧縮リトルエンディアンのみ対応しています。`);
+    throw new LocalizedError((m) => m.dicom.transferSyntax(fileName, ts));
   }
 
   const rows = ds.uint16('x00280010');
   const cols = ds.uint16('x00280011');
   const frames = ds.intString('x00280008') ?? 1;
-  if (!rows || !cols) throw new Error(`${fileName}: Rows/Columns がありません`);
+  if (!rows || !cols) throw new LocalizedError((m) => m.dicom.noRowsColumns(fileName));
   const bits = ds.uint16('x00280100') ?? 0;
   const pixelRep = ds.uint16('x00280103') ?? 0;
   const samples = ds.uint16('x00280002') ?? 1;
-  if (samples !== 1) throw new Error(`${fileName}: SamplesPerPixel=${samples} は非対応です`);
-  if (bits !== 16 && bits !== 32) throw new Error(`${fileName}: BitsAllocated=${bits} は非対応です`);
+  if (samples !== 1) throw new LocalizedError((m) => m.dicom.samplesPerPixel(fileName, samples));
+  if (bits !== 16 && bits !== 32) throw new LocalizedError((m) => m.dicom.bitsAllocated(fileName, bits));
 
-  const ipp = requireNumbers(ds, 'x00200032', 'ImagePositionPatient', 3);
-  const iop = requireNumbers(ds, 'x00200037', 'ImageOrientationPatient', 6);
-  const ps = requireNumbers(ds, 'x00280030', 'PixelSpacing', 2);
+  const ipp = requireNumbers(ds, 'x00200032', 'ImagePositionPatient', fileName, 3);
+  const iop = requireNumbers(ds, 'x00200037', 'ImageOrientationPatient', fileName, 6);
+  const ps = requireNumbers(ds, 'x00280030', 'PixelSpacing', fileName, 2);
   const scaling = ds.floatString('x3004000e') ?? 1;
-  if (!ds.elements['x3004000e']) warnings.push('DoseGridScaling がないため 1 として扱いました');
+  if (!ds.elements['x3004000e']) warnings.push((m) => m.dicom.noScaling);
 
   let offsets: number[];
   if (frames > 1) {
-    offsets = requireNumbers(ds, 'x3004000c', 'GridFrameOffsetVector', frames);
+    offsets = requireNumbers(ds, 'x3004000c', 'GridFrameOffsetVector', fileName, frames);
   } else {
-    offsets = ds.elements['x3004000c'] ? numbers(ds, 'x3004000c').slice(0, 1) : [0];
+    offsets = ds.elements['x3004000c'] ? numbers(ds, 'x3004000c', fileName).slice(0, 1) : [0];
     if (offsets.length === 0) offsets = [0];
   }
 
@@ -130,18 +131,18 @@ export function parseRtDose(buffer: ArrayBuffer, fileName: string): RtDose {
   const rowAx = axisOf(iop.slice(0, 3));
   const colAx = axisOf(iop.slice(3, 6));
   if (!rowAx || !colAx || rowAx.axis !== 0 || colAx.axis !== 1) {
-    throw new Error(`${fileName}: 非対応の向きです (ImageOrientationPatient=${iop.join('\\')})。Axial 系のみ対応しています。`);
+    throw new LocalizedError((m) => m.dicom.orientation(fileName, iop.join('\\')));
   }
   // スライス方向 = 行 × 列 (z 成分の符号)
   const sliceSign = rowAx.sign * colAx.sign;
 
   // ピクセルデータ
   const pxEl = ds.elements['x7fe00010'];
-  if (!pxEl) throw new Error(`${fileName}: PixelData がありません`);
-  if (pxEl.encapsulatedPixelData) throw new Error(`${fileName}: 圧縮されたピクセルデータは非対応です`);
+  if (!pxEl) throw new LocalizedError((m) => m.dicom.noPixelData(fileName));
+  if (pxEl.encapsulatedPixelData) throw new LocalizedError((m) => m.dicom.compressed(fileName));
   const nPix = rows * cols * frames;
   const bytesPer = bits / 8;
-  if (pxEl.length < nPix * bytesPer) throw new Error(`${fileName}: PixelData の長さが不足しています`);
+  if (pxEl.length < nPix * bytesPer) throw new LocalizedError((m) => m.dicom.shortPixelData(fileName));
   const raw = bytes.slice(pxEl.dataOffset, pxEl.dataOffset + nPix * bytesPer).buffer;
   const px: ArrayLike<number> =
     bits === 32
@@ -187,19 +188,20 @@ export function parseRtDose(buffer: ArrayBuffer, fileName: string): RtDose {
     const diffs = zs.slice(1).map((z, m) => z - zs[m]);
     const minD = Math.min(...diffs);
     const maxD = Math.max(...diffs);
-    if (minD <= 1e-6) throw new Error(`${fileName}: GridFrameOffsetVector に重複した位置があります`);
+    if (minD <= 1e-6) throw new LocalizedError((m) => m.dicom.duplicateFrames(fileName));
     if (maxD - minD > 0.01) {
       dz = minD;
       nz = Math.round((zs[frames - 1] - zs[0]) / dz) + 1;
       data = resampleZ(sorted, plane, zs, zs[0], dz, nz);
-      warnings.push(`スライス間隔が不均一なため ${dz.toFixed(2)} mm 間隔に再サンプリングしました`);
+      const resampled = dz.toFixed(2);
+      warnings.push((m) => m.dicom.resampledZ(resampled));
     } else {
       dz = (zs[frames - 1] - zs[0]) / (frames - 1);
     }
   }
 
   const units = str(ds, 'x30040002').toUpperCase();
-  if (units && units !== 'GY') warnings.push(`線量単位が ${units} です (Gy 以外)`);
+  if (units && units !== 'GY') warnings.push((m) => m.dicom.units(units));
 
   // ReferencedRTPlanSequence
   let referencedPlanUID: string | null = null;

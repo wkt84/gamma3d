@@ -5,6 +5,7 @@ import { doseColorMap, gammaColorMap, type ColorMap } from '../ui/colormap.ts';
 import { drawHistogram, LIGHT_CHART_THEME } from '../ui/histogram-chart.ts';
 import { histSpecs, type DdUnit, type Derived } from '../ui/results.ts';
 import { drawSlice, PLANES, renderSlice, voxelToImage, type Ijk, type Plane } from '../ui/slice.ts';
+import { m, text as msgText, type Msg } from '../i18n/index.ts';
 
 export interface ReportSide {
   set: DoseSet;
@@ -19,7 +20,7 @@ export interface ReportInput {
   ref: ReportSide;
   ev: ReportSide;
   displayMax: number;
-  warnings: string[];
+  warnings: Msg[];
   cursor: Ijk;
   includePatient: boolean;
   reviewer: string;
@@ -42,7 +43,7 @@ function loadFonts(): Promise<{ regular: string; bold: string }> {
   fontCache ??= (async () => {
     const get = async (file: string) => {
       const res = await fetch(`${import.meta.env.BASE_URL}fonts/${file}`);
-      if (!res.ok) throw new Error(`フォントを読み込めません (${file})`);
+      if (!res.ok) throw new Error(m().report.fontError(file));
       return toBase64(await res.arrayBuffer());
     };
     const [regular, bold] = await Promise.all([get('NotoSansJP-Regular.ttf'), get('NotoSansJP-Bold.ttf')]);
@@ -84,6 +85,7 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
 
   const { result: r, derived: d } = input;
   const p = r.params;
+  const t = m().pdf;
   const now = new Date();
   const W = 210;
   const M = 14;
@@ -127,41 +129,41 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
 
   // ───── 1 ページ目 ─────
   ink(10);
-  text('3D ガンマ解析レポート', M, 13, 16, 'bold');
+  text(t.title, M, 13, 16, 'bold');
   ink(90);
-  text(`作成日時 ${stamp(now)}`, W - M, 15, 8.5, 'normal', { align: 'right' });
+  text(t.createdAt(stamp(now)), W - M, 15, 8.5, 'normal', { align: 'right' });
 
-  let y = heading('データ', 26);
+  let y = heading(t.data, 26);
   const side = (s: ReportSide) =>
-    `${s.set.label}\n${s.set.doses.length} ファイル / ${s.set.summary}${scaleFactor(s.scale) !== 1 ? ` / 係数 ${formatScale(s.scale)}` : ''}`;
+    t.side(msgText(s.set.label), s.set.doses.length, msgText(s.set.summary), scaleFactor(s.scale) !== 1 ? formatScale(s.scale) : null);
   const sameFor = input.ref.set.frameOfReferenceUID === input.ev.set.frameOfReferenceUID;
   const patient = input.includePatient
-    ? `${input.ref.set.patientName || '(氏名なし)'}  /  ID: ${input.ref.set.patientId || '–'}`
-    : '(非表示)';
+    ? t.patientValue(input.ref.set.patientName || m().side.noName, input.ref.set.patientId || '–')
+    : t.hidden;
   y = kvTable(
     [
-      ['患者', patient],
-      ['比較元 (Ref)', side(input.ref)],
-      ['比較先 (Eval)', side(input.ev)],
-      ['座標系', sameFor ? 'FrameOfReferenceUID 一致' : 'FrameOfReferenceUID 不一致 (位置合わせなしで比較)'],
+      [t.patient, patient],
+      [t.ref, side(input.ref)],
+      [t.eval, side(input.ev)],
+      [t.frame, sameFor ? t.frameSame : t.frameDifferent],
     ],
     y,
   );
 
-  y = heading('解析条件', y + 3);
+  y = heading(t.conditions, y + 3);
   const [nx, ny, nz] = r.ref.dims;
   y = kvTable(
     [
-      ['基準', `${p.ddPercent}% / ${p.dtaMm} mm`],
-      ['正規化', p.local ? 'Local (局所線量)' : 'Global'],
-      ['基準線量', `${p.normDoseGy.toFixed(3)} Gy`],
-      ['γ 閾値', `${p.gammaThresholdPercent}% (${((p.gammaThresholdPercent / 100) * p.normDoseGy).toFixed(3)} Gy)`],
-      ['DD 閾値', `${p.ddThresholdPercent}%${p.ddLowGradientOnly ? ` / 勾配 < ${p.gradientThresholdPercentPerMm}%/mm のみ` : ''}`],
-      ['DTA 対象', `勾配 ≥ ${p.gradientThresholdPercentPerMm}%/mm かつ γ 閾値以上`],
-      ['γ 上限', `${p.gammaCap} (探索半径 ${(p.gammaCap * p.dtaMm).toFixed(1)} mm)`],
-      ['探索刻み', `${(p.dtaMm / p.stepsPerDta).toFixed(2)} mm (局所詰め 1/8 刻みまで)`],
-      ['計算格子', `比較元の格子 ${nx}×${ny}×${nz}`],
-      ['比較先', '三線形補間'],
+      [t.criteria, `${p.ddPercent}% / ${p.dtaMm} mm`],
+      [t.norm, p.local ? t.normLocal : 'Global'],
+      [t.normDose, `${p.normDoseGy.toFixed(3)} Gy`],
+      [t.gammaThreshold, `${p.gammaThresholdPercent}% (${((p.gammaThresholdPercent / 100) * p.normDoseGy).toFixed(3)} Gy)`],
+      [t.ddThreshold, `${p.ddThresholdPercent}%${p.ddLowGradientOnly ? t.ddLowGradient(p.gradientThresholdPercentPerMm) : ''}`],
+      [t.dtaTarget, t.dtaTargetValue(p.gradientThresholdPercentPerMm)],
+      [t.cap, t.capValue(p.gammaCap, (p.gammaCap * p.dtaMm).toFixed(1))],
+      [t.step, t.stepValue((p.dtaMm / p.stepsPerDta).toFixed(2))],
+      [t.grid, t.gridValue(`${nx}×${ny}×${nz}`)],
+      [t.evalInterp, t.evalInterpValue],
     ],
     y,
     2,
@@ -169,36 +171,36 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
   );
 
   // 結果
-  y = heading('結果', y + 3);
+  y = heading(t.results, y + 3);
   const boxW = (CW - 8) / 3;
   const boxes: { title: string; big: string; lines: [string, string][] }[] = [
     {
-      title: 'ガンマ',
+      title: t.gamma,
       big: `${fmt(d.gamma.passRate, 2)}%`,
       lines: [
-        ['評価点数', d.gamma.evaluated.toLocaleString()],
-        ['平均 / 中央値', `${fmt(d.gamma.mean, 3)} / ${fmt(d.gamma.median, 3)}`],
-        ['γ1% (99%値)', fmt(d.gamma.p99, 3)],
-        ['最大', d.gamma.maxCapped ? `≥ ${p.gammaCap}` : fmt(d.gamma.max, 3)],
+        [t.evaluated, d.gamma.evaluated.toLocaleString()],
+        [t.meanMedian, `${fmt(d.gamma.mean, 3)} / ${fmt(d.gamma.median, 3)}`],
+        [t.p99, fmt(d.gamma.p99, 3)],
+        [t.max, d.gamma.maxCapped ? `≥ ${p.gammaCap}` : fmt(d.gamma.max, 3)],
       ],
     },
     {
-      title: `線量差 (±${p.ddPercent}% 以内)`,
+      title: t.ddBox(p.ddPercent),
       big: `${fmt(d.dd.passRate, 2)}%`,
       lines: [
-        ['評価点数', d.dd.evaluated.toLocaleString()],
-        ['平均 ± SD', `${fmt(d.dd.meanPct, 2)} ± ${fmt(d.dd.sdPct, 2)}%`],
-        ['最小 / 最大', `${fmt(d.dd.minPct, 2)} / ${fmt(d.dd.maxPct, 2)}%`],
+        [t.evaluated, d.dd.evaluated.toLocaleString()],
+        [t.meanSd, `${fmt(d.dd.meanPct, 2)} ± ${fmt(d.dd.sdPct, 2)}%`],
+        [t.minMax, `${fmt(d.dd.minPct, 2)} / ${fmt(d.dd.maxPct, 2)}%`],
         ['', ''],
       ],
     },
     {
-      title: `DTA (≤ ${p.dtaMm} mm)`,
+      title: t.dtaBox(p.dtaMm),
       big: `${fmt(d.dta.passRate, 2)}%`,
       lines: [
-        ['評価点数', d.dta.evaluated.toLocaleString()],
-        ['平均 / 中央値', `${fmt(d.dta.mean, 2)} / ${fmt(d.dta.median, 2)} mm`],
-        ['未検出', `${d.dta.notFound.toLocaleString()} 点`],
+        [t.evaluated, d.dta.evaluated.toLocaleString()],
+        [t.meanMedian, `${fmt(d.dta.mean, 2)} / ${fmt(d.dta.median, 2)} mm`],
+        [t.notFound, t.points(d.dta.notFound.toLocaleString())],
         ['', ''],
       ],
     },
@@ -223,7 +225,7 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
   y += 42;
 
   // ヒストグラム
-  y = heading('ヒストグラム', y + 1);
+  y = heading(t.histograms, y + 1);
   const specs = histSpecs(r, d, input.ddUnit);
   const chartW = (CW - 8) / 3;
   const chartH = chartW * 0.72;
@@ -241,25 +243,25 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
   y += chartH + 3;
 
   if (input.warnings.length) {
-    y = heading('注意事項', y + 2);
+    y = heading(t.notes, y + 2);
     doc.setTextColor(150, 90, 0);
-    const lines = doc.setFont(FONT, 'normal').setFontSize(8).splitTextToSize(input.warnings.map((w) => `・${w}`).join('\n'), CW) as string[];
+    const lines = doc.setFont(FONT, 'normal').setFontSize(8).splitTextToSize(input.warnings.map((w) => t.bullet(msgText(w))).join('\n'), CW) as string[];
     doc.text(lines.slice(0, 12), M, y, { baseline: 'top' });
   }
 
   // ───── 2 ページ目: 断面画像 ─────
   doc.addPage();
   const [cx, cy, cz] = [0, 1, 2].map((a) => r.ref.origin[a] + input.cursor[a] * r.ref.spacing[a]);
-  y = heading(`断面画像 (x = ${cx.toFixed(1)}, y = ${cy.toFixed(1)}, z = ${cz.toFixed(1)} mm)`, 13);
+  y = heading(t.slices(cx.toFixed(1), cy.toFixed(1), cz.toFixed(1)), 13);
   const doseMap = doseColorMap(input.displayMax);
   const gMap = gammaColorMap(p.gammaCap);
   const bg: [number, number, number] = [10, 10, 10];
   const labelW = 16;
   const imgW = (CW - labelW - 6) / 3;
   const cols: { title: string; values: ArrayLike<number>; cmap: ColorMap }[] = [
-    { title: '比較元 (Ref)', values: r.ref.data, cmap: doseMap },
-    { title: '比較先 (Eval)', values: r.evalOnRef, cmap: doseMap },
-    { title: 'ガンマ', values: r.gamma, cmap: gMap },
+    { title: t.ref, values: r.ref.data, cmap: doseMap },
+    { title: t.eval, values: r.evalOnRef, cmap: doseMap },
+    { title: t.gamma, values: r.gamma, cmap: gMap },
   ];
   cols.forEach((c, i) => {
     ink(40);
@@ -305,7 +307,7 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
   y += 12;
 
   // コメント・確認者
-  y = heading('コメント・確認', Math.max(y, 222));
+  y = heading(t.commentTitle, Math.max(y, 222));
   doc.setDrawColor(200);
   doc.rect(M, y, CW, 26);
   if (input.comment) {
@@ -315,10 +317,10 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
   }
   y += 31;
   ink(40);
-  text('確認者', M, y, 9);
+  text(t.reviewer, M, y, 9);
   doc.line(M + 14, y + 5, M + 90, y + 5);
   if (input.reviewer) text(input.reviewer, M + 16, y, 10);
-  text('確認日', M + 100, y, 9);
+  text(t.reviewDate, M + 100, y, 9);
   doc.line(M + 114, y + 5, W - M, y + 5);
 
   // フッター

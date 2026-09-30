@@ -1,3 +1,5 @@
+import { m } from '../i18n/index.ts';
+
 /** 値を RGB に変換するカラーマップ。NaN 等の対象外は null を返し、背景色で描かれる。 */
 export interface ColorMap {
   rgb(v: number): [number, number, number] | null;
@@ -143,7 +145,7 @@ export function dtaColorMap(maxMm: number): ColorMap {
       { value: maxMm / 2, label: `${fmt(maxMm / 2)}` },
       { value: maxMm, label: `${fmt(maxMm)} mm` },
     ],
-    extras: [{ color: css(NOT_FOUND), label: '未検出' }],
+    extras: [{ color: css(NOT_FOUND), label: m().viewer.notFound }],
   };
 }
 

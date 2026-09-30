@@ -8,6 +8,7 @@ import { ddColorMap, doseColorMap, dtaColorMap, gammaColorMap, gradientColorMap,
 import { HistogramView, SlicePanel } from './ui/components.ts';
 import { derive, histSpecs, type DdUnit, type Derived } from './ui/results.ts';
 import { imageToVoxel, PLANES, renderSlice, voxelToImage, type Ijk, type Plane } from './ui/slice.ts';
+import { applyTranslations, errorMsg, m, text, type Messages, type Msg } from './i18n/index.ts';
 
 // ───────── 状態 ─────────
 
@@ -18,7 +19,7 @@ interface Side {
   doses: RtDose[];
   sets: DoseSet[];
   selected: DoseSet | null;
-  notices: string[];
+  notices: Msg[];
   fileCount: number;
 }
 
@@ -45,20 +46,17 @@ let abort: AbortController | null = null;
 
 const BG: [number, number, number] = [10, 10, 10];
 
+applyTranslations();
+
 // ───────── ビュー ─────────
 
 const mapSelect = document.createElement('select');
-mapSelect.setAttribute('aria-label', 'マップの種類');
-for (const [v, label] of [
-  ['gamma', 'ガンマ'],
-  ['dd', '線量差'],
-  ['dta', 'DTA'],
-  ['grad', '線量勾配'],
-] as const) {
-  mapSelect.add(new Option(label, v));
+mapSelect.setAttribute('aria-label', m().viewer.mapType);
+for (const v of ['gamma', 'dd', 'dta', 'grad'] as const) {
+  mapSelect.add(new Option(m().viewer.maps[v], v));
 }
 const ddUnitSelect = document.createElement('select');
-ddUnitSelect.setAttribute('aria-label', '線量差の単位');
+ddUnitSelect.setAttribute('aria-label', m().viewer.ddUnit);
 ddUnitSelect.add(new Option('%', 'percent'));
 ddUnitSelect.add(new Option('Gy', 'gy'));
 const mapHead = document.createElement('span');
@@ -66,21 +64,21 @@ mapHead.style.display = 'flex';
 mapHead.style.gap = '6px';
 mapHead.append(mapSelect, ddUnitSelect);
 
-const panelRef = new SlicePanel($('#panel-ref'), '比較元 (Ref)');
-const panelEval = new SlicePanel($('#panel-eval'), '比較先 (Eval)');
-const panelMap = new SlicePanel($('#panel-map'), 'マップ', mapHead);
+const panelRef = new SlicePanel($('#panel-ref'), m().viewer.refPanel);
+const panelEval = new SlicePanel($('#panel-eval'), m().viewer.evalPanel);
+const panelMap = new SlicePanel($('#panel-map'), m().viewer.mapPanel, mapHead);
 const panels = [panelRef, panelEval, panelMap];
 const charts = [
-  new HistogramView($('#chart-dd'), '線量差ヒストグラム'),
-  new HistogramView($('#chart-dta'), 'DTA ヒストグラム'),
-  new HistogramView($('#chart-gamma'), 'ガンマヒストグラム'),
+  new HistogramView($('#chart-dd'), m().viewer.histEmpty.dd),
+  new HistogramView($('#chart-dta'), m().viewer.histEmpty.dta),
+  new HistogramView($('#chart-gamma'), m().viewer.histEmpty.gamma),
 ];
 
 const slider = $<HTMLInputElement>('#slice');
 const sliceLabel = $('#slice-label');
 const readout = $('#readout');
 
-$('#app-meta').textContent = `v${__APP_VERSION__} ・ データはブラウザ内でのみ処理されます`;
+$('#app-meta').textContent = m().app.meta(__APP_VERSION__);
 
 function currentMap(): { values: ArrayLike<number>; cmap: ColorMap } | null {
   if (!result || !derived) return null;
@@ -101,7 +99,7 @@ function currentMap(): { values: ArrayLike<number>; cmap: ColorMap } | null {
 
 function renderViews(): void {
   if (!display) {
-    panels.forEach((p) => p.message('比較元の RTDOSE を読み込んでください'));
+    panels.forEach((p) => p.message(m().viewer.loadRef));
     sliceLabel.textContent = '–';
     return;
   }
@@ -116,15 +114,15 @@ function renderViews(): void {
     panelEval.show(renderSlice(grid, display.evalOnRef, plane, cursor, doseMap, BG), cross);
     panelEval.setColorMap(doseMap);
   } else {
-    panelEval.message('比較先の RTDOSE を読み込んでください');
+    panelEval.message(m().viewer.loadEval);
   }
 
-  const m = currentMap();
-  if (m) {
-    panelMap.show(renderSlice(grid, m.values, plane, cursor, m.cmap, BG), cross);
-    panelMap.setColorMap(m.cmap);
+  const map = currentMap();
+  if (map) {
+    panelMap.show(renderSlice(grid, map.values, plane, cursor, map.cmap, BG), cross);
+    panelMap.setColorMap(map.cmap);
   } else {
-    panelMap.message('解析を実行すると表示されます');
+    panelMap.message(m().viewer.afterRun);
   }
   ddUnitSelect.hidden = mapMode !== 'dd';
 
@@ -150,16 +148,16 @@ function showReadout(ijk: Ijk): void {
   const g = display.ref;
   const n = ijk[0] + g.dims[0] * (ijk[1] + g.dims[1] * ijk[2]);
   const pos = [0, 1, 2].map((a) => (g.origin[a] + ijk[a] * g.spacing[a]).toFixed(1)).join(', ');
-  const f = (v: number | undefined, d: number) => (v === undefined || Number.isNaN(v) ? '–' : v === Infinity ? '未検出' : v.toFixed(d));
+  const f = (v: number | undefined, d: number) => (v === undefined || Number.isNaN(v) ? '–' : v === Infinity ? m().viewer.notFound : v.toFixed(d));
   const parts = [`(${pos}) mm`, `Ref ${f(g.data[n], 3)} Gy`];
   if (display.evalOnRef) parts.push(`Eval ${f(display.evalOnRef[n], 3)} Gy`);
   if (result && derived) {
     parts.push(`γ ${f(result.gamma[n], 2)}`);
     parts.push(`DD ${f(derived.ddPct[n], 2)}%`);
     parts.push(`DTA ${f(result.dta[n], 2)} mm`);
-    parts.push(`勾配 ${f(result.grad[n], 1)}%/mm`);
+    parts.push(`${m().viewer.gradient} ${f(result.grad[n], 1)}%/mm`);
   }
-  readout.textContent = parts.join('  ・  ');
+  readout.textContent = parts.join(m().viewer.separator);
   readout.title = readout.textContent;
 }
 
@@ -237,12 +235,12 @@ async function loadFiles(side: Side, files: File[]): Promise<void> {
   const summary = $('.set-summary', side.root);
   $('.dose-info', side.root).hidden = false;
   const doses: RtDose[] = [];
-  const notices: string[] = [];
+  const notices: Msg[] = [];
   let skipped = 0;
   const candidates = files.filter((f) => !f.name.startsWith('.'));
   for (let i = 0; i < candidates.length; i++) {
     const f = candidates[i];
-    summary.textContent = `読み込み中… ${i + 1}/${candidates.length}`;
+    summary.textContent = m().side.loading(i + 1, candidates.length);
     const name = f.webkitRelativePath || f.name;
     try {
       // 先頭だけで Modality を判定し、CT など RTDOSE 以外は本体を読まない
@@ -253,11 +251,11 @@ async function loadFiles(side: Side, files: File[]): Promise<void> {
       }
       doses.push(parseRtDose(await f.arrayBuffer(), name));
     } catch (e) {
-      notices.push(e instanceof Error ? e.message : `${name}: 読み込みに失敗しました`);
+      notices.push(e instanceof Error ? errorMsg(e) : (t) => t.side.loadFailed(name));
     }
   }
-  if (skipped) notices.push(`RTDOSE 以外の ${skipped} ファイルを無視しました`);
-  if (!doses.length) notices.push('RTDOSE が見つかりませんでした');
+  if (skipped) notices.push((t) => t.side.skipped(skipped));
+  if (!doses.length) notices.push((t) => t.side.noRtdose);
 
   side.doses = doses;
   side.fileCount = candidates.length;
@@ -270,14 +268,14 @@ async function loadFiles(side: Side, files: File[]): Promise<void> {
 
 function renderSide(side: Side): void {
   const select = $<HTMLSelectElement>('.set-select', side.root);
-  select.replaceChildren(...side.sets.map((s) => new Option(s.label, s.id)));
+  select.replaceChildren(...side.sets.map((s) => new Option(text(s.label), s.id)));
   select.disabled = side.sets.length < 2;
   if (side.selected) select.value = side.selected.id;
   const s = side.selected;
-  $('.set-summary', side.root).textContent = s ? `${s.patientName || '(氏名なし)'} / ${s.patientId || '–'}\n${s.summary}` : '';
+  $('.set-summary', side.root).textContent = s ? `${s.patientName || m().side.noName} / ${s.patientId || '–'}\n${text(s.summary)}` : '';
   $('.set-summary', side.root).style.whiteSpace = 'pre-line';
   const list = $('.file-list', side.root);
-  $('summary', list).textContent = `RTDOSE ${side.doses.length} / ${side.fileCount} ファイル`;
+  $('summary', list).textContent = m().side.fileCount(side.doses.length, side.fileCount);
   $('ul', list).replaceChildren(
     ...side.doses.map((d) => {
       const li = document.createElement('li');
@@ -289,7 +287,7 @@ function renderSide(side: Side): void {
   $('.warnings', side.root).replaceChildren(
     ...[...side.notices, ...(s?.warnings ?? [])].map((w) => {
       const li = document.createElement('li');
-      li.textContent = w;
+      li.textContent = text(w);
       return li;
     }),
   );
@@ -306,7 +304,7 @@ function scaleOf(side: Side): DoseScale {
   };
   const s = { num: read('.scale-num'), den: read('.scale-den') };
   const f = scaleFactor(s);
-  $('.scale-value', side.root).textContent = s.num === 1 && s.den === 1 ? '' : `= ${Number(f.toPrecision(6))} 倍`;
+  $('.scale-value', side.root).textContent = s.num === 1 && s.den === 1 ? '' : m().side.scaleValue(Number(f.toPrecision(6)));
   return s;
 }
 
@@ -432,7 +430,7 @@ $$<HTMLInputElement>('.params input').forEach((i) => i.addEventListener('change'
 function markStale(): void {
   if (result && !stale) {
     stale = true;
-    $('#run-status').textContent = '解析条件が変更されています。再解析してください。';
+    $('#run-status').textContent = m().run.stale;
   }
 }
 
@@ -453,14 +451,15 @@ function readParams(): AnalysisParams {
   const bad = (cond: boolean, msg: string) => {
     if (cond) throw new Error(msg);
   };
-  bad(!(p.ddPercent > 0), 'DD は正の値を指定してください');
-  bad(!(p.dtaMm > 0), 'DTA は正の値を指定してください');
-  bad(!(p.normDoseGy > 0), '基準線量は正の値を指定してください');
-  bad(!(p.gammaThresholdPercent >= 0 && p.gammaThresholdPercent < 100), 'γ 閾値は 0–100% で指定してください');
-  bad(!(p.ddThresholdPercent >= 0 && p.ddThresholdPercent < 100), 'DD 閾値は 0–100% で指定してください');
-  bad(!(p.gradientThresholdPercentPerMm >= 0), '勾配閾値は 0 以上で指定してください');
-  bad(!(p.gammaCap >= 1 && p.gammaCap <= 3), 'γ 上限は 1–3 で指定してください');
-  bad(!(p.stepsPerDta >= 2 && p.stepsPerDta <= 20), '探索分割数は 2–20 で指定してください');
+  const e = m().params.invalid;
+  bad(!(p.ddPercent > 0), e.dd);
+  bad(!(p.dtaMm > 0), e.dta);
+  bad(!(p.normDoseGy > 0), e.normDose);
+  bad(!(p.gammaThresholdPercent >= 0 && p.gammaThresholdPercent < 100), e.gammaThreshold);
+  bad(!(p.ddThresholdPercent >= 0 && p.ddThresholdPercent < 100), e.ddThreshold);
+  bad(!(p.gradientThresholdPercentPerMm >= 0), e.gradient);
+  bad(!(p.gammaCap >= 1 && p.gammaCap <= 3), e.cap);
+  bad(!(p.stepsPerDta >= 2 && p.stepsPerDta <= 20), e.steps);
   return p;
 }
 
@@ -491,7 +490,7 @@ runBtn.addEventListener('click', async () => {
   abort = new AbortController();
   progress.hidden = false;
   progress.value = 0;
-  runStatus.textContent = '計算中…';
+  runStatus.textContent = m().run.running;
   updateButtons();
   try {
     const ev = scaled(sides.eval.selected.volume, factorOf(sides.eval));
@@ -499,12 +498,12 @@ runBtn.addEventListener('click', async () => {
     derived = derive(result);
     stale = false;
     display.evalOnRef = result.evalOnRef;
-    runStatus.textContent = `完了: ${(result.elapsedMs / 1000).toFixed(1)} 秒 (${result.workers} スレッド${result.sharedMemory ? '' : '、共有メモリなし'})`;
+    runStatus.textContent = m().run.done((result.elapsedMs / 1000).toFixed(1), result.workers, result.sharedMemory);
     renderViews();
     renderCharts();
     renderSummary();
   } catch (e) {
-    runStatus.textContent = e instanceof AnalysisCancelled ? '中止しました' : `エラー: ${(e as Error).message}`;
+    runStatus.textContent = e instanceof AnalysisCancelled ? m().run.cancelled : m().run.error((e as Error).message);
   } finally {
     abort = null;
     progress.hidden = true;
@@ -515,20 +514,20 @@ runBtn.addEventListener('click', async () => {
 cancelBtn.addEventListener('click', () => abort?.abort());
 
 /** 比較元・比較先の組み合わせに関する注意事項 */
-function crossWarnings(): string[] {
-  const out: string[] = [];
+function crossWarnings(): Msg[] {
+  const out: Msg[] = [];
   const a = sides.ref.selected;
   const b = sides.eval.selected;
   if (a && b) {
-    if (a.frameOfReferenceUID !== b.frameOfReferenceUID) out.push('比較元と比較先の FrameOfReferenceUID が異なります (位置合わせは行っていません)');
-    if (a.patientId !== b.patientId) out.push(`比較元と比較先の患者 ID が異なります (${a.patientId || '–'} / ${b.patientId || '–'})`);
+    if (a.frameOfReferenceUID !== b.frameOfReferenceUID) out.push((t) => t.summary.warnFrameOfReference);
+    if (a.patientId !== b.patientId) out.push((t) => t.summary.warnPatientId(a.patientId || '–', b.patientId || '–'));
   }
   if (result) {
     const p = result.params;
     const thr = (p.gammaThresholdPercent / 100) * p.normDoseGy;
     let outside = 0;
     for (let n = 0; n < result.evalOnRef.length; n++) if (Number.isNaN(result.evalOnRef[n]) && result.ref.data[n] >= thr) outside++;
-    if (outside) out.push(`γ 閾値以上の比較元 ${outside.toLocaleString()} 点が比較先の範囲外のため評価対象外です`);
+    if (outside) out.push((t) => t.summary.warnOutside(outside.toLocaleString()));
   }
   return out;
 }
@@ -554,30 +553,31 @@ function renderSummary(): void {
   const warnings = crossWarnings();
   const nodes: HTMLElement[] = [];
   const f = (v: number, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '–');
+  const s = m().summary;
   if (result && derived) {
     const p = result.params;
     const g = derived.gamma;
     nodes.push(
       stat(
-        `ガンマ パス率 (${p.ddPercent}%/${p.dtaMm}mm ${p.local ? 'Local' : 'Global'}, 閾値 ${p.gammaThresholdPercent}%)`,
+        s.gammaLabel(p.ddPercent, p.dtaMm, p.local, p.gammaThresholdPercent),
         `${f(g.passRate, 2)}%`,
-        `n=${g.evaluated.toLocaleString()} ・ 平均 ${f(g.mean, 2)} ・ γ1% ${f(g.p99, 2)} ・ 最大 ${g.maxCapped ? `≥${p.gammaCap}` : f(g.max, 2)}`,
+        s.gammaSub(g.evaluated.toLocaleString(), f(g.mean, 2), f(g.p99, 2), g.maxCapped ? `≥${p.gammaCap}` : f(g.max, 2)),
       ),
       stat(
-        `線量差 ±${p.ddPercent}% 以内`,
+        s.ddLabel(p.ddPercent),
         `${f(derived.dd.passRate, 1)}%`,
-        `n=${derived.dd.evaluated.toLocaleString()} ・ 平均 ${f(derived.dd.meanPct, 2)} ± ${f(derived.dd.sdPct, 2)}%`,
+        s.ddSub(derived.dd.evaluated.toLocaleString(), f(derived.dd.meanPct, 2), f(derived.dd.sdPct, 2)),
       ),
       stat(
-        `DTA ≤ ${p.dtaMm} mm (勾配 ≥ ${p.gradientThresholdPercentPerMm}%/mm)`,
+        s.dtaLabel(p.dtaMm, p.gradientThresholdPercentPerMm),
         `${f(derived.dta.passRate, 1)}%`,
-        `n=${derived.dta.evaluated.toLocaleString()} ・ 平均 ${f(derived.dta.mean, 2)} mm ・ 未検出 ${derived.dta.notFound.toLocaleString()}`,
+        s.dtaSub(derived.dta.evaluated.toLocaleString(), f(derived.dta.mean, 2), derived.dta.notFound.toLocaleString()),
       ),
     );
   } else if (!display || !sides.eval.selected) {
     const p = document.createElement('p');
     p.className = 'empty';
-    p.textContent = '比較元と比較先の RTDOSE を読み込み、「解析実行」を押してください。';
+    p.textContent = s.empty;
     nodes.push(p);
   }
   if (warnings.length) {
@@ -587,7 +587,7 @@ function renderSummary(): void {
     ul.replaceChildren(
       ...warnings.map((w) => {
         const li = document.createElement('li');
-        li.textContent = w;
+        li.textContent = text(w);
         return li;
       }),
     );
@@ -602,7 +602,7 @@ pdfBtn.addEventListener('click', async () => {
   if (!result || !derived || !display || !sides.ref.selected || !sides.eval.selected) return;
   const status = $('#pdf-status');
   pdfBtn.disabled = true;
-  status.textContent = 'レポートを作成中… (初回はフォントの読み込みに時間がかかります)';
+  status.textContent = m().report.creating;
   try {
     const { generateReport, reportFileName } = await import('./report/pdf.ts');
     const input = {
@@ -613,7 +613,7 @@ pdfBtn.addEventListener('click', async () => {
       ref: { set: sides.ref.selected, scale: scaleOf(sides.ref) },
       ev: { set: sides.eval.selected, scale: scaleOf(sides.eval) },
       displayMax: display.max,
-      warnings: [...crossWarnings(), ...sides.ref.selected.warnings, ...sides.eval.selected.warnings, ...(stale ? ['レポート作成時点で解析条件が変更されています (表示中の結果は変更前の条件によるもの)'] : [])],
+      warnings: [...crossWarnings(), ...sides.ref.selected.warnings, ...sides.eval.selected.warnings, ...(stale ? [(t: Messages) => t.report.staleWarning] : [])],
       cursor: [...cursor] as Ijk,
       includePatient: $<HTMLInputElement>('#r-patient').checked,
       reviewer: $<HTMLInputElement>('#r-reviewer').value.trim(),
@@ -626,9 +626,9 @@ pdfBtn.addEventListener('click', async () => {
     a.download = reportFileName(input);
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    status.textContent = `${a.download} を出力しました (表示中の断面位置の画像を掲載)`;
+    status.textContent = m().report.done(a.download);
   } catch (e) {
-    status.textContent = `エラー: ${(e as Error).message}`;
+    status.textContent = m().run.error((e as Error).message);
   } finally {
     updateButtons();
   }
@@ -636,5 +636,6 @@ pdfBtn.addEventListener('click', async () => {
 
 // 初期表示
 renderViews();
+renderSummary();
 renderCharts();
 updateButtons();

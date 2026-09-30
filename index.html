@@ -8,72 +8,73 @@
     <title>Gamma3D</title>
   </head>
   <body>
+    <!-- 文言は src/i18n の辞書から data-i18n* 属性のキーで流し込む -->
     <header class="app-header">
-      <h1>Gamma3D <span class="subtitle">RTDOSE 3次元ガンマ解析</span></h1>
+      <h1>Gamma3D <span class="subtitle" data-i18n="app.subtitle"></span></h1>
       <span class="meta" id="app-meta"></span>
     </header>
 
     <div class="layout">
-      <aside class="input-pane" aria-label="データ入力">
+      <aside class="input-pane" data-i18n-aria-label="app.inputPane">
         <section class="card" data-side="ref">
-          <h2>比較元 <span class="tag">Reference</span></h2>
+          <h2><span data-i18n="side.ref"></span> <span class="tag">Reference</span></h2>
           <div class="dropzone" tabindex="0" role="button">
-            <p>RTDOSE ファイル / フォルダをドロップ</p>
-            <p class="hint">またはクリックしてファイル選択 ・ <a href="#" class="pick-dir">フォルダ選択</a></p>
+            <p data-i18n="side.drop"></p>
+            <p class="hint"><span data-i18n="side.dropHint"></span> <a href="#" class="pick-dir" data-i18n="side.pickDir"></a></p>
             <input type="file" class="file-input" multiple hidden />
             <input type="file" class="dir-input" webkitdirectory multiple hidden />
           </div>
           <div class="dose-info" hidden>
-            <label>線量 <select class="set-select"></select></label>
+            <label><span data-i18n="side.dose"></span> <select class="set-select"></select></label>
             <p class="set-summary"></p>
             <details class="file-list"><summary></summary><ul></ul></details>
             <div class="scale-row">
-              <label class="inline">係数
-                <input type="number" class="scale-num" value="1" step="any" min="0" aria-label="係数の分子" />
+              <label class="inline"><span data-i18n="side.scale"></span>
+                <input type="number" class="scale-num" value="1" step="any" min="0" data-i18n-aria-label="side.scaleNum" />
                 <span aria-hidden="true">/</span>
-                <input type="number" class="scale-den" value="1" step="any" min="0" aria-label="係数の分母" />
+                <input type="number" class="scale-den" value="1" step="any" min="0" data-i18n-aria-label="side.scaleDen" />
               </label>
               <span class="scale-value hint"></span>
             </div>
-            <p class="hint">例: PLAN を 1 回分にするなら 1 / 分割回数</p>
+            <p class="hint" data-i18n="side.scaleHint"></p>
             <ul class="warnings"></ul>
           </div>
         </section>
 
         <section class="card" data-side="eval">
-          <h2>比較先 <span class="tag">Evaluated</span></h2>
+          <h2><span data-i18n="side.eval"></span> <span class="tag">Evaluated</span></h2>
           <div class="dropzone" tabindex="0" role="button">
-            <p>RTDOSE ファイル / フォルダをドロップ</p>
-            <p class="hint">またはクリックしてファイル選択 ・ <a href="#" class="pick-dir">フォルダ選択</a></p>
+            <p data-i18n="side.drop"></p>
+            <p class="hint"><span data-i18n="side.dropHint"></span> <a href="#" class="pick-dir" data-i18n="side.pickDir"></a></p>
             <input type="file" class="file-input" multiple hidden />
             <input type="file" class="dir-input" webkitdirectory multiple hidden />
           </div>
           <div class="dose-info" hidden>
-            <label>線量 <select class="set-select"></select></label>
+            <label><span data-i18n="side.dose"></span> <select class="set-select"></select></label>
             <p class="set-summary"></p>
             <details class="file-list"><summary></summary><ul></ul></details>
             <div class="scale-row">
-              <label class="inline">係数
-                <input type="number" class="scale-num" value="1" step="any" min="0" aria-label="係数の分子" />
+              <label class="inline"><span data-i18n="side.scale"></span>
+                <input type="number" class="scale-num" value="1" step="any" min="0" data-i18n-aria-label="side.scaleNum" />
                 <span aria-hidden="true">/</span>
-                <input type="number" class="scale-den" value="1" step="any" min="0" aria-label="係数の分母" />
+                <input type="number" class="scale-den" value="1" step="any" min="0" data-i18n-aria-label="side.scaleDen" />
               </label>
               <span class="scale-value hint"></span>
             </div>
-            <p class="hint">例: PLAN を 1 回分にするなら 1 / 分割回数</p>
+            <p class="hint" data-i18n="side.scaleHint"></p>
             <ul class="warnings"></ul>
           </div>
         </section>
 
         <section class="card params">
-          <h2>解析条件</h2>
-          <label>プリセット
+          <h2 data-i18n="params.title"></h2>
+          <label><span data-i18n="params.preset"></span>
             <select id="preset">
               <option value="3,3">3% / 3 mm</option>
               <option value="3,2">3% / 2 mm</option>
               <option value="2,2">2% / 2 mm</option>
               <option value="1,1">1% / 1 mm</option>
-              <option value="custom">カスタム</option>
+              <option value="custom" data-i18n="params.custom"></option>
             </select>
           </label>
           <div class="row2">
@@ -81,66 +82,64 @@
             <label>DTA (mm) <input type="number" id="p-dta" value="3" step="0.5" min="0.1" /></label>
           </div>
           <fieldset class="segmented">
-            <legend>正規化</legend>
+            <legend data-i18n="params.norm"></legend>
             <label><input type="radio" name="norm" value="global" checked /> Global</label>
             <label><input type="radio" name="norm" value="local" /> Local</label>
           </fieldset>
-          <label>基準線量 (Gy)
+          <label><span data-i18n="params.normDose"></span>
             <span class="with-check">
               <input type="number" id="p-normdose" step="0.01" min="0" disabled />
-              <label class="inline"><input type="checkbox" id="p-normauto" checked /> 比較元の最大線量</label>
+              <label class="inline"><input type="checkbox" id="p-normauto" checked /> <span data-i18n="params.normAuto"></span></label>
             </span>
           </label>
           <div class="row2">
-            <label>γ 閾値 (%) <input type="number" id="p-gthr" value="10" step="1" min="0" max="100" /></label>
-            <label>DD 閾値 (%) <input type="number" id="p-ddthr" value="10" step="1" min="0" max="100" /></label>
+            <label><span data-i18n="params.gammaThreshold"></span> <input type="number" id="p-gthr" value="10" step="1" min="0" max="100" /></label>
+            <label><span data-i18n="params.ddThreshold"></span> <input type="number" id="p-ddthr" value="10" step="1" min="0" max="100" /></label>
           </div>
           <div class="row2">
-            <label title="DTA はこの勾配以上の点 (かつ γ 閾値以上) で評価します">DTA 勾配閾値 (%/mm) <input type="number" id="p-grad" value="3" step="0.5" min="0" /></label>
-            <label class="inline check-cell"><input type="checkbox" id="p-ddlow" /> DD を低勾配領域に限定</label>
+            <label data-i18n-title="params.gradientTitle"><span data-i18n="params.gradient"></span> <input type="number" id="p-grad" value="3" step="0.5" min="0" /></label>
+            <label class="inline check-cell"><input type="checkbox" id="p-ddlow" /> <span data-i18n="params.ddLowGradient"></span></label>
           </div>
           <details class="advanced">
-            <summary>詳細設定</summary>
+            <summary data-i18n="params.advanced"></summary>
             <div class="row2">
-              <label title="探索半径 = 上限 × DTA">γ 上限 <input type="number" id="p-cap" value="2" step="0.5" min="1" max="3" /></label>
-              <label title="探索刻み = DTA / 分割数">探索分割数 <input type="number" id="p-steps" value="10" step="1" min="2" max="20" /></label>
+              <label data-i18n-title="params.capTitle"><span data-i18n="params.cap"></span> <input type="number" id="p-cap" value="2" step="0.5" min="1" max="3" /></label>
+              <label data-i18n-title="params.stepsTitle"><span data-i18n="params.steps"></span> <input type="number" id="p-steps" value="10" step="1" min="2" max="20" /></label>
             </div>
-            <p class="hint">探索半径 = γ 上限 × DTA。刻み = DTA / 分割数で格子探索し、格子点の間の等線量面との交点も調べた後、最良点の周りを 1/8 刻みまで詰めます。</p>
+            <p class="hint" data-i18n="params.advancedHint"></p>
           </details>
           <div class="run-row">
-            <button id="run" class="primary" disabled>解析実行</button>
-            <button id="cancel" hidden>中止</button>
+            <button id="run" class="primary" disabled data-i18n="params.run"></button>
+            <button id="cancel" hidden data-i18n="params.cancel"></button>
           </div>
           <progress id="progress" max="1" value="0" hidden></progress>
           <p id="run-status" class="hint" aria-live="polite"></p>
         </section>
 
         <section class="card report">
-          <h2>PDF レポート</h2>
-          <label class="inline"><input type="checkbox" id="r-patient" checked /> 患者情報を含める</label>
-          <label>確認者 <input type="text" id="r-reviewer" placeholder="氏名" /></label>
-          <label>コメント <textarea id="r-comment" rows="2"></textarea></label>
-          <button id="pdf" disabled>PDF 出力</button>
+          <h2 data-i18n="report.title"></h2>
+          <label class="inline"><input type="checkbox" id="r-patient" checked /> <span data-i18n="report.includePatient"></span></label>
+          <label><span data-i18n="report.reviewer"></span> <input type="text" id="r-reviewer" data-i18n-placeholder="report.reviewerPlaceholder" /></label>
+          <label><span data-i18n="report.comment"></span> <textarea id="r-comment" rows="2"></textarea></label>
+          <button id="pdf" disabled data-i18n="report.button"></button>
           <p id="pdf-status" class="hint" aria-live="polite"></p>
         </section>
       </aside>
 
-      <main class="result-pane" aria-label="解析結果">
-        <div class="summary" id="summary">
-          <p class="empty">比較元と比較先の RTDOSE を読み込み、「解析実行」を押してください。</p>
-        </div>
+      <main class="result-pane" data-i18n-aria-label="app.resultPane">
+        <div class="summary" id="summary"></div>
 
         <div class="toolbar">
-          <div class="segmented plane" role="radiogroup" aria-label="断面">
+          <div class="segmented plane" role="radiogroup" data-i18n-aria-label="viewer.plane">
             <button data-plane="axial" class="active">Axial</button>
             <button data-plane="sagittal">Sagittal</button>
             <button data-plane="coronal">Coronal</button>
           </div>
-          <label class="slice-ctrl">スライス
+          <label class="slice-ctrl"><span data-i18n="viewer.slice"></span>
             <input type="range" id="slice" min="0" max="0" value="0" />
             <span id="slice-label">–</span>
           </label>
-          <span class="hint">ホイール: スライス送り ・ ダブルクリック: 十字カーソル移動</span>
+          <span class="hint" data-i18n="viewer.hint"></span>
           <span class="readout" id="readout"></span>
         </div>
 
