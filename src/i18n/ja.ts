@@ -16,6 +16,7 @@ export const ja = {
     inputPane: 'データ入力',
     resultPane: '解析結果',
     language: '言語',
+    github: 'GitHub リポジトリ (ソースコード・不具合の報告)',
   },
 
   side: {

@@ -19,6 +19,14 @@ async function analyze(page: Page): Promise<void> {
 
 const sliceLabel = (page: Page) => page.locator('#slice-label');
 
+test('右上に GitHub リポジトリへのリンクがある (新しいタブで開く)', async ({ page }) => {
+  await page.goto('/');
+  const link = page.locator('.app-header a.github');
+  await expect(link).toHaveAttribute('href', 'https://github.com/wkt84/gamma3d');
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(link).toHaveAttribute('aria-label', /GitHub/);
+});
+
 test('crossOriginIsolated で、SharedArrayBuffer が使える', async ({ page }) => {
   await page.goto('/');
   expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
