@@ -12,7 +12,8 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
     "test": "vitest run",
     "gen:samples": "node scripts/gen-samples.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "validate": "npm run gen:samples && node validation/export.ts && uv run validation/compare.py"
   },
   "engines": {
     "node": "24.x"

@@ -459,7 +459,7 @@ function readParams(): AnalysisParams {
   bad(!(p.gammaThresholdPercent >= 0 && p.gammaThresholdPercent < 100), 'γ 閾値は 0–100% で指定してください');
   bad(!(p.ddThresholdPercent >= 0 && p.ddThresholdPercent < 100), 'DD 閾値は 0–100% で指定してください');
   bad(!(p.gradientThresholdPercentPerMm >= 0), '勾配閾値は 0 以上で指定してください');
-  bad(!(p.gammaCap >= 1 && p.gammaCap <= 5), 'γ 上限は 1–5 で指定してください');
+  bad(!(p.gammaCap >= 1 && p.gammaCap <= 3), 'γ 上限は 1–3 で指定してください');
   bad(!(p.stepsPerDta >= 2 && p.stepsPerDta <= 20), '探索分割数は 2–20 で指定してください');
   return p;
 }

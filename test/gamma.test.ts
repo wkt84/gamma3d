@@ -77,6 +77,18 @@ describe('gamma', () => {
     expect(r.grad[centerIndex(ref)]).toBeCloseTo(5, 3);
   });
 
+  it('探索刻みの間に線量が ΔD 以上変わる急勾配でも、等線量面との交点から最小値を見つける', () => {
+    // 0.5 Gy/mm は 1% (0.02 Gy) の 25 倍/mm。刻み 0.1 mm で線量が 2.5ΔD 変わるため、格子点だけでは谷を見逃す
+    const g = 0.5;
+    const s = 0.37;
+    const ref = makeVolume(grid.dims, grid.spacing, grid.origin, (x) => 5 + g * x);
+    const ev = makeVolume(grid.dims, grid.spacing, grid.origin, (x) => 5 + g * (x - s));
+    const { r, p } = run(ref, ev, { ddPercent: 1, dtaMm: 1 });
+    const dD = (p.ddPercent / 100) * p.normDoseGy;
+    const expected = (g * s) / Math.sqrt(dD * dD + g * g * p.dtaMm * p.dtaMm);
+    expect(r.gamma[centerIndex(ref)]).toBeCloseTo(expected, 3);
+  });
+
   it('Local では局所線量で正規化される', () => {
     const ref = makeVolume(grid.dims, grid.spacing, grid.origin, () => 1);
     const ev = makeVolume(grid.dims, grid.spacing, grid.origin, () => 1.02);
