@@ -247,3 +247,33 @@ test('判定基準 (許容・アクションレベル) で合否を表示し、�
   await expect(page.locator('#p-act')).toHaveAttribute('aria-invalid', 'true');
   await expect(badge).toHaveCount(0);
 });
+
+test('標準 4 条件をまとめて計算し、比較表から表示を切り替えられる (個別に計算した値と一致)', async ({ page }) => {
+  const gammaTile = page.locator('.stat').first();
+  // 2%/2mm を個別に計算した値
+  await load(page);
+  await page.selectOption('#preset', '2,2');
+  await analyze(page);
+  const single = await gammaTile.locator('.value').textContent();
+
+  await page.check('#p-batch');
+  await page.selectOption('#preset', '3,3');
+  await analyze(page);
+  await expect(page.locator('#run-status')).toContainText('4 条件');
+  const rows = page.locator('table.compare tbody tr');
+  await expect(rows).toHaveCount(4);
+  // 入力欄の条件 (3%/3mm) が表示されている
+  await expect(page.locator('table.compare tr.selected')).toContainText('3%/3mm');
+  await expect(gammaTile).toContainText('3%/3mm');
+
+  await rows.nth(2).locator('button').click();
+  await expect(page.locator('table.compare tr.selected')).toContainText('2%/2mm');
+  await expect(gammaTile).toContainText('2%/2mm');
+  await expect(gammaTile.locator('.value')).toHaveText(single!);
+  await expect(page.locator('#chart-gamma')).toHaveAttribute('aria-label', /2%\/2mm/);
+  // 比較表の値とも一致
+  await expect(rows.nth(2).locator('td').nth(1)).toHaveText(single!);
+
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('#pdf')]);
+  expect(download.suggestedFilename()).toMatch(/\.pdf$/);
+});

@@ -58,8 +58,22 @@ export class WasmKernel {
     return new Float32Array(this.ex.memory.buffer, ptr, n);
   }
 
-  /** 解析ごとの設定。offsets と evalRange は gamma.ts の buildSearchOffsets / buildRangeGrid のもの */
-  setup(ref: Volume, ev: Volume, p: AnalysisParams, offsets: SearchOffsets, evalRange: RangeGrid): void {
+  /** 線量と、比較先全体のブロックの範囲表 (gamma.ts の buildRangeGrid) を設定する (解析ごとに 1 回) */
+  setVolumes(ref: Volume, ev: Volume, evalRange: RangeGrid): void {
+    const ex = this.ex;
+    const blocks = evalRange.min.length;
+    const rp = ex.reserve_range(blocks);
+    const range = this.f32(rp, 3 * blocks);
+    range.set(evalRange.min, 0);
+    range.set(evalRange.max, blocks);
+    range.set(evalRange.lip, 2 * blocks);
+    ex.set_range(...evalRange.nb);
+    this.ref = ref;
+    this.ev = ev;
+  }
+
+  /** 解析条件と探索表 (gamma.ts の buildSearchOffsets) を設定する (条件ごと) */
+  configure(p: AnalysisParams, offsets: SearchOffsets): void {
     const ex = this.ex;
     const n = offsets.r2.length;
     const op = ex.reserve_offsets(n);
@@ -72,15 +86,6 @@ export class WasmKernel {
     const np = ex.reserve_nbr(n);
     new Int32Array(ex.memory.buffer, np, 6 * n).set(offsets.nbr);
     ex.set_offsets(n, offsets.stepN);
-
-    const blocks = evalRange.min.length;
-    const rp = ex.reserve_range(blocks);
-    const range = this.f32(rp, 3 * blocks);
-    range.set(evalRange.min, 0);
-    range.set(evalRange.max, blocks);
-    range.set(evalRange.lip, 2 * blocks);
-    ex.set_range(...evalRange.nb);
-
     ex.set_params(
       p.ddPercent,
       p.dtaMm,
@@ -93,9 +98,13 @@ export class WasmKernel {
       p.gammaCap,
       p.stepsPerDta,
     );
-    this.ref = ref;
-    this.ev = ev;
     this.params = p;
+  }
+
+  /** setVolumes と configure をまとめて行う */
+  setup(ref: Volume, ev: Volume, p: AnalysisParams, offsets: SearchOffsets, evalRange: RangeGrid): void {
+    this.setVolumes(ref, ev, evalRange);
+    this.configure(p, offsets);
   }
 
   /** 比較元のスライス [k0, k1) を計算する */

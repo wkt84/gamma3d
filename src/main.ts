@@ -1,7 +1,8 @@
 import './style.css';
 import { DEFAULT_PARAMS, type AnalysisParams } from './core/gamma.ts';
 import { judge, validLevels, type ActionLevels, type Judgment } from './core/judgment.ts';
-import { AnalysisCancelled, runAnalysis, type AnalysisResult } from './core/runner.ts';
+import { AnalysisCancelled, runAnalyses, type AnalysisResult } from './core/runner.ts';
+import { gammaStats, type GammaStats } from './core/stats.ts';
 import { maxValue, resampleTo, shiftVolume, type Vec3, type Volume } from './core/volume.ts';
 import { buildDoseSets, scaled, scaleFactor, type DoseScale, type DoseSet } from './dicom/group.ts';
 import { isRtDose, parseRtDose, type RtDose } from './dicom/rtdose.ts';
@@ -49,8 +50,19 @@ let mapMode: MapMode = 'gamma';
 let ddUnit: DdUnit = 'percent';
 /** 表示用: 比較元 (係数適用済み) と、比較元格子へ補間した比較先 */
 let display: { ref: Volume; evalOnRef: Float32Array | null; max: number } | null = null;
+/** 解析結果 (一括計算では条件ごと) と、表示中の結果 */
+let results: AnalysisResult[] = [];
+let resultStats: GammaStats[] = [];
 let result: AnalysisResult | null = null;
 let derived: Derived | null = null;
+
+/** 一括計算する標準の 4 条件 (DD %, DTA mm) */
+const STANDARD_CRITERIA: [number, number][] = [
+  [3, 3],
+  [3, 2],
+  [2, 2],
+  [1, 1],
+];
 let stale = false;
 let abort: AbortController | null = null;
 
@@ -346,6 +358,8 @@ function evalVolume(set: DoseSet): Volume {
 /** データ・係数が変わったとき: 結果を破棄して表示を作り直す */
 function onDataChanged(resetCursor: boolean): void {
   if (result) runStatus.textContent = '';
+  results = [];
+  resultStats = [];
   result = null;
   derived = null;
   stale = false;
@@ -709,14 +723,15 @@ runBtn.addEventListener('click', async () => {
   updateButtons();
   try {
     const ev = evalVolume(sides.eval.selected);
-    result = await runAnalysis(display.ref, ev, params, (f) => (progress.value = f), abort.signal);
-    derived = derive(result);
+    const batch = $<HTMLInputElement>('#p-batch').checked;
+    const list = batch ? STANDARD_CRITERIA.map(([dd, dta]) => ({ ...params, ddPercent: dd, dtaMm: dta })) : [params];
+    results = await runAnalyses(display.ref, ev, list, (f) => (progress.value = f), abort.signal);
+    resultStats = results.map((r) => gammaStats(r.gamma, r.params.gammaCap));
     stale = false;
-    display.evalOnRef = result.evalOnRef;
-    runStatus.textContent = m().run.done((result.elapsedMs / 1000).toFixed(1), result.workers, result.sharedMemory, m().run.engine[result.engine]);
-    renderViews();
-    renderCharts();
-    renderSummary();
+    const r0 = results[0];
+    runStatus.textContent = m().run.done((r0.elapsedMs / 1000).toFixed(1), r0.workers, r0.sharedMemory, m().run.engine[r0.engine], results.length);
+    // 入力欄の条件と同じものがあればそれを、なければ最初の条件を表示する
+    selectResult(Math.max(0, list.findIndex((p) => p.ddPercent === params.ddPercent && p.dtaMm === params.dtaMm)));
   } catch (e) {
     runStatus.textContent = e instanceof AnalysisCancelled ? m().run.cancelled : m().run.error((e as Error).message);
   } finally {
@@ -754,7 +769,7 @@ function crossWarnings(): Msg[] {
 const JUDGMENT_ICON: Record<Judgment, string> = { pass: '✓', review: '!', fail: '✕' };
 
 /** 判定の表示 (色だけでなくアイコンと文字でも示す) */
-function judgmentBadge(j: Judgment, levels: ActionLevels): HTMLElement {
+function judgmentBadge(j: Judgment, levels: ActionLevels | null): HTMLElement {
   const b = document.createElement('span');
   b.className = `judgment ${j}`;
   const icon = document.createElement('span');
@@ -763,10 +778,13 @@ function judgmentBadge(j: Judgment, levels: ActionLevels): HTMLElement {
   icon.textContent = JUDGMENT_ICON[j];
   const label = document.createElement('strong');
   label.textContent = m().judgment[j];
-  const note = document.createElement('span');
-  note.className = 'note';
-  note.textContent = m().judgment.levels(levels.tolerance, levels.action);
-  b.append(icon, label, note);
+  b.append(icon, label);
+  if (levels) {
+    const note = document.createElement('span');
+    note.className = 'note';
+    note.textContent = m().judgment.levels(levels.tolerance, levels.action);
+    b.append(note);
+  }
   return b;
 }
 
@@ -784,6 +802,57 @@ function stat(label: string, value: string, sub: string, cls = ''): HTMLElement 
   s.textContent = sub;
   d.append(l, v, s);
   return d;
+}
+
+/** 表示する結果を切り替える (一括計算の比較表から) */
+function selectResult(i: number): void {
+  if (!display || !results[i]) return;
+  result = results[i];
+  derived = derive(result);
+  display.evalOnRef = result.evalOnRef;
+  renderViews();
+  renderCharts();
+  renderSummary();
+}
+
+const criteriaLabel = (p: AnalysisParams) => `${p.ddPercent}%/${p.dtaMm}mm`;
+
+/** 一括計算の比較表 (行を選ぶと表示を切り替える) */
+function comparisonTable(): HTMLElement {
+  const t = m().compare;
+  const f = (v: number, d: number) => (Number.isFinite(v) ? v.toFixed(d) : '–');
+  const levels = levelsOf();
+  const table = document.createElement('table');
+  table.className = 'compare';
+  const caption = table.createCaption();
+  caption.textContent = t.title;
+  const head = table.createTHead().insertRow();
+  for (const h of [t.criteria, t.passRate, t.mean, t.p99, t.judgment]) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    th.textContent = h;
+    head.append(th);
+  }
+  const body = table.createTBody();
+  results.forEach((r, i) => {
+    const st = resultStats[i];
+    const row = body.insertRow();
+    const current = r === result;
+    row.className = current ? 'selected' : '';
+    const cell = row.insertCell();
+    const btn = document.createElement('button');
+    btn.textContent = criteriaLabel(r.params);
+    btn.setAttribute('aria-pressed', String(current));
+    btn.addEventListener('click', () => selectResult(i));
+    cell.append(btn);
+    row.insertCell().textContent = `${f(st.passRate, 2)}%`;
+    row.insertCell().textContent = f(st.mean, 3);
+    row.insertCell().textContent = f(st.p99, 3);
+    const jc = row.insertCell();
+    const j = levels ? judge(st.passRate, levels) : null;
+    if (j && levels) jc.append(judgmentBadge(j, null));
+  });
+  return table;
 }
 
 function renderSummary(): void {
@@ -816,6 +885,7 @@ function renderSummary(): void {
         s.dtaSub(derived.dta.evaluated.toLocaleString(), f(derived.dta.mean, 2), derived.dta.notFound.toLocaleString()),
       ),
     );
+    if (results.length > 1) nodes.push(comparisonTable());
   } else if (!display || !sides.eval.selected) {
     const p = document.createElement('p');
     p.className = 'empty';
@@ -857,6 +927,7 @@ pdfBtn.addEventListener('click', async () => {
       displayMax: display.max,
       shift: shiftOf(),
       levels: levelsOf(),
+      comparison: results.length > 1 ? results.map((r, i) => ({ label: criteriaLabel(r.params), stats: resultStats[i], selected: r === result })) : null,
       warnings: [...crossWarnings(), ...sides.ref.selected.warnings, ...sides.eval.selected.warnings, ...(stale ? [(t: Messages) => t.report.staleWarning] : [])],
       cursor: [...cursor] as Ijk,
       includePatient: $<HTMLInputElement>('#r-patient').checked,

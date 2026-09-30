@@ -46,36 +46,50 @@ function shareable(v: Volume): Volume {
 /**
  * 比較元グリッドのスライスを小さな単位に分け、Worker プールで並列に計算する。
  */
-export function runAnalysis(
-  refIn: Volume,
-  evIn: Volume,
+export async function runAnalysis(
+  ref: Volume,
+  ev: Volume,
   params: AnalysisParams,
   onProgress: (fraction: number) => void,
   signal?: AbortSignal,
 ): Promise<AnalysisResult> {
+  return (await runAnalyses(ref, ev, [params], onProgress, signal))[0];
+}
+
+/**
+ * 複数の解析条件をまとめて計算する。Worker の起動・線量の受け渡し・ブロックの範囲表・wasm の読み込みは
+ * 1 回で済ませ、条件ごとには探索表と条件だけを渡す。
+ *
+ * 条件は ddPercent / dtaMm だけが違う前提で、条件によらない dd・grad・evalOnRef は最初の条件の結果を
+ * 全条件で共有する (条件ごとに持つのは gamma と dta だけ)。
+ */
+export function runAnalyses(
+  refIn: Volume,
+  evIn: Volume,
+  paramsList: AnalysisParams[],
+  onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
+): Promise<AnalysisResult[]> {
   const t0 = performance.now();
   const ref = shareable(refIn);
   const ev = shareable(evIn);
   const sharedMemory = ref.data.buffer instanceof SharedArrayBuffer;
-  const offsets = buildSearchOffsets(params.dtaMm, params.stepsPerDta, params.gammaCap);
+  const offsetsList = paramsList.map((p) => buildSearchOffsets(p.dtaMm, p.stepsPerDta, p.gammaCap));
 
   const [nx, ny, nz] = ref.dims;
   const plane = nx * ny;
   const total = plane * nz;
   const nWorkers = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 16, nz));
   const chunk = Math.max(1, Math.floor(nz / (nWorkers * 6)));
-  const jobs: [number, number][] = [];
-  for (let k = 0; k < nz; k += chunk) jobs.push([k, Math.min(nz, k + chunk)]);
+  const slices: [number, number][] = [];
+  for (let k = 0; k < nz; k += chunk) slices.push([k, Math.min(nz, k + chunk)]);
+  // 条件ごとにまとめて並べる (Worker が wasm の条件を切り替える回数を減らすため)
+  const jobs = paramsList.flatMap((_, id) => slices.map(([k0, k1]) => ({ id, k0, k1 })));
 
-  const out = {
-    gamma: new Float32Array(total),
-    dd: new Float32Array(total),
-    dta: new Float32Array(total),
-    grad: new Float32Array(total),
-    evalOnRef: new Float32Array(total),
-  };
+  const shared = { dd: new Float32Array(total), grad: new Float32Array(total), evalOnRef: new Float32Array(total) };
+  const perCondition = paramsList.map(() => ({ gamma: new Float32Array(total), dta: new Float32Array(total) }));
 
-  return new Promise<AnalysisResult>((resolve, reject) => {
+  return new Promise<AnalysisResult[]>((resolve, reject) => {
     const workers: Worker[] = [];
     let next = 0;
     let done = 0;
@@ -92,16 +106,21 @@ export function runAnalysis(
         reject(err);
         return;
       }
-      resolve({
-        params,
-        ref: refIn,
-        ...out,
-        elapsedMs: performance.now() - t0,
-        workers: workers.length,
-        sharedMemory,
-        searchPoints: offsets.r2.length,
-        engine: engines.size === 1 ? [...engines][0] : 'mixed',
-      });
+      const elapsedMs = performance.now() - t0;
+      const engine = engines.size === 1 ? [...engines][0] : 'mixed';
+      resolve(
+        paramsList.map((params, id) => ({
+          params,
+          ref: refIn,
+          ...shared,
+          ...perCondition[id],
+          elapsedMs,
+          workers: workers.length,
+          sharedMemory,
+          searchPoints: offsetsList[id].r2.length,
+          engine,
+        })),
+      );
     };
     const onAbort = () => finish(new AnalysisCancelled());
     signal?.addEventListener('abort', onAbort);
@@ -109,8 +128,7 @@ export function runAnalysis(
 
     const dispatch = (w: Worker) => {
       if (next >= jobs.length) return;
-      const [k0, k1] = jobs[next++];
-      w.postMessage({ type: 'job', k0, k1 } satisfies ToWorker);
+      w.postMessage({ type: 'job', ...jobs[next++] } satisfies ToWorker);
     };
 
     for (let n = 0; n < nWorkers; n++) {
@@ -122,18 +140,21 @@ export function runAnalysis(
         engines.add(msg.engine);
         const s = msg.slab;
         const at = s.k0 * plane;
-        out.gamma.set(s.gamma, at);
-        out.dd.set(s.dd, at);
-        out.dta.set(s.dta, at);
-        out.grad.set(s.grad, at);
-        out.evalOnRef.set(s.evalOnRef, at);
+        perCondition[msg.id].gamma.set(s.gamma, at);
+        perCondition[msg.id].dta.set(s.dta, at);
+        if (msg.id === 0) {
+          shared.dd.set(s.dd, at);
+          shared.grad.set(s.grad, at);
+          shared.evalOnRef.set(s.evalOnRef, at);
+        }
         done++;
         onProgress(done / jobs.length);
         if (done === jobs.length) finish();
         else dispatch(w);
       };
       w.onerror = (e) => finish(new Error(e.message || m().run.workerError));
-      w.postMessage({ type: 'init', ref, ev, params, offsets, wasmUrl: url } satisfies ToWorker);
+      w.postMessage({ type: 'init', ref, ev, wasmUrl: url } satisfies ToWorker);
+      paramsList.forEach((params, id) => w.postMessage({ type: 'configure', id, params, offsets: offsetsList[id] } satisfies ToWorker));
       dispatch(w);
     }
   });

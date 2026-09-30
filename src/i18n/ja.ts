@@ -60,6 +60,8 @@ export const ja = {
     tolerance: '許容レベル (%)',
     action: 'アクションレベル (%)',
     levelsTitle: 'γ パス率が許容レベル以上なら合格、アクションレベル以上なら要確認、それ未満なら不合格 (既定値は AAPM TG-218)',
+    batch: '標準 4 条件 (3%/3mm・3%/2mm・2%/2mm・1%/1mm) をまとめて計算',
+    batchTitle: 'DD と DTA 以外の条件は共通です。計算後、比較表の行を選ぶと表示を切り替えられます',
     advanced: '詳細設定',
     cap: 'γ 上限',
     capTitle: '探索半径 = 上限 × DTA',
@@ -106,8 +108,8 @@ export const ja = {
 
   run: {
     running: '計算中…',
-    done: (seconds: S, workers: N, shared: boolean, engine: S) =>
-      `完了: ${seconds} 秒 (${workers} スレッド、${engine}${shared ? '' : '、共有メモリなし'})`,
+    done: (seconds: S, workers: N, shared: boolean, engine: S, conditions: N) =>
+      `完了: ${seconds} 秒 (${conditions > 1 ? `${conditions} 条件、` : ''}${workers} スレッド、${engine}${shared ? '' : '、共有メモリなし'})`,
     engine: { wasm: 'WebAssembly', ts: 'TypeScript', mixed: 'WebAssembly / TypeScript 混在' },
     cancelled: '中止しました',
     error: (message: S) => `エラー: ${message}`,
@@ -153,6 +155,15 @@ export const ja = {
     review: '要確認',
     fail: '不合格',
     levels: (tolerance: N, action: N) => `許容 ${tolerance}% / アクション ${action}%`,
+  },
+
+  compare: {
+    title: '条件の比較 (条件を選ぶと表示を切り替えます)',
+    criteria: '条件',
+    passRate: 'パス率',
+    mean: '平均 γ',
+    p99: 'γ1%',
+    judgment: '判定',
   },
 
   summary: {
@@ -270,6 +281,8 @@ export const ja = {
     minMax: '最小 / 最大',
     notFound: '未検出',
     points: (n: S) => `${n} 点`,
+    comparison: '条件の比較',
+    comparisonShown: (label: S) => `${label} (表示中)`,
     histograms: 'ヒストグラム',
     notes: '注意事項',
     bullet: (s: S) => `・${s}`,
