@@ -37,20 +37,27 @@ export const DEFAULT_PARAMS: Omit<AnalysisParams, 'normDoseGy'> = {
 };
 
 /**
- * 距離順に並べた探索オフセット。
- * x/y/z は mm、r2 は (距離 / DTA)^2 (= ガンマの距離項)。
+ * 距離順に並べた探索オフセット (刻み = DTA / stepsPerDta の立方格子のうち、探索球内の点)。
+ * x/y/z は mm、r2 は (距離 / DTA)^2 (= ガンマの距離項)、rn は 距離 / DTA。
+ * nbr は各点の格子上の隣接 6 点のインデックス (探索球外は -1)。
  */
 export interface SearchOffsets {
   x: Float32Array;
   y: Float32Array;
   z: Float32Array;
   r2: Float32Array;
+  rn: Float32Array;
+  nbr: Int32Array;
+  /** 刻み / DTA */
+  stepN: number;
 }
 
 export function buildSearchOffsets(dtaMm: number, stepsPerDta: number, gammaCap: number): SearchOffsets {
   const step = dtaMm / stepsPerDta;
   const nmax = Math.ceil(gammaCap * stepsPerDta);
   const limit2 = (gammaCap * stepsPerDta) ** 2;
+  const L = 2 * nmax + 1;
+  const cell = (a: number, b: number, c: number) => a + nmax + L * (b + nmax + L * (c + nmax));
   const pts: { a: number; b: number; c: number; q: number }[] = [];
   for (let c = -nmax; c <= nmax; c++) {
     for (let b = -nmax; b <= nmax; b++) {
@@ -67,7 +74,12 @@ export function buildSearchOffsets(dtaMm: number, stepsPerDta: number, gammaCap:
     y: new Float32Array(n),
     z: new Float32Array(n),
     r2: new Float32Array(n),
+    rn: new Float32Array(n),
+    nbr: new Int32Array(6 * n).fill(-1),
+    stepN: 1 / stepsPerDta,
   };
+  // 格子座標 → 並べ替え後のインデックス
+  const index = new Int32Array(L * L * L).fill(-1);
   const inv = 1 / (stepsPerDta * stepsPerDta);
   for (let m = 0; m < n; m++) {
     const p = pts[m];
@@ -75,6 +87,25 @@ export function buildSearchOffsets(dtaMm: number, stepsPerDta: number, gammaCap:
     out.y[m] = p.b * step;
     out.z[m] = p.c * step;
     out.r2[m] = p.q * inv;
+    out.rn[m] = Math.sqrt(p.q) / stepsPerDta;
+    index[cell(p.a, p.b, p.c)] = m;
+  }
+  const dirs = [
+    [1, 0, 0],
+    [-1, 0, 0],
+    [0, 1, 0],
+    [0, -1, 0],
+    [0, 0, 1],
+    [0, 0, -1],
+  ];
+  for (let m = 0; m < n; m++) {
+    const p = pts[m];
+    dirs.forEach(([da, db, dc], q) => {
+      const a = p.a + da;
+      const b = p.b + db;
+      const c = p.c + dc;
+      if (Math.abs(a) <= nmax && Math.abs(b) <= nmax && Math.abs(c) <= nmax) out.nbr[6 * m + q] = index[cell(a, b, c)];
+    });
   }
   return out;
 }
@@ -166,6 +197,7 @@ export function computeSlab(
   const globalDD = (p.ddPercent / 100) * norm;
   const localFrac = p.ddPercent / 100;
   const cap2 = p.gammaCap * p.gammaCap;
+  const refineLimit = (p.gammaCap + 1 / p.stepsPerDta) ** 2;
   const dtaMm = p.dtaMm;
   const step = dtaMm / p.stepsPerDta;
   const invDta2 = 1 / (dtaMm * dtaMm);
@@ -174,7 +206,14 @@ export function computeSlab(
   const offY = offsets.y;
   const offZ = offsets.z;
   const offR2 = offsets.r2;
+  const offRn = offsets.rn;
+  const nbr = offsets.nbr;
+  const stepN = offsets.stepN;
   const nOff = offR2.length;
+  // 格子点ごとの線量差と、それが今の比較元の点で書かれたかを示す世代番号
+  const diffs = new Float32Array(nOff);
+  const stamp = new Int32Array(nOff);
+  let gen = 0;
 
   // 探索球 (半径 = 上限 × DTA) を覆う比較先のボクセル範囲を求めるための定数
   const radius = p.gammaCap * dtaMm;
@@ -245,30 +284,79 @@ export function computeSlab(
         // どの探索点でも線量項はこの値以上になる
         const floor2 = gap * gap * invD2;
         let best = (de0 - dr) * (de0 - dr) * invD2;
-        let bestM = 0;
+        let bx = 0;
+        let by = 0;
+        let bz = 0;
+        // 探索済みの格子点の (比較先 − 比較元) を、世代番号付きで保持する
+        gen++;
+        diffs[0] = de0 - dr;
+        stamp[0] = gen;
+        // 隣接格子点の間で線量差が ΔD 以上変わる (= 谷が刻みより細い) 点を見たら、打ち切りに 1 刻みの余裕を持たせる
+        let margin = 0;
         for (let m = 1; m < nOff; m++) {
           const r2 = offR2[m];
-          if (r2 + floor2 >= best || r2 >= cap2) break;
-          const de = sample(x + offX[m], y + offY[m], z + offZ[m]);
+          // 探索半径ちょうどの点も調べる (真値が上限のわずかに手前の点を上限と誤らないため)
+          if (r2 > cap2) break;
+          // 未探索の格子点と探索済みの点を結ぶ辺上の交点は、現在の半径より最大 1 刻み内側にありうる
+          const inner = offRn[m] - margin;
+          if ((inner > 0 ? inner * inner : 0) + floor2 >= best) break;
+          const ox_ = offX[m];
+          const oy_ = offY[m];
+          const oz_ = offZ[m];
+          const de = sample(x + ox_, y + oy_, z + oz_);
           if (de !== de) continue; // NaN (範囲外)
           const t = de - dr;
+          diffs[m] = t;
+          stamp[m] = gen;
           const g2 = r2 + t * t * invD2;
           if (g2 < best) {
             best = g2;
-            bestM = m;
+            bx = ox_;
+            by = oy_;
+            bz = oz_;
+          }
+          // 隣接する探索済みの格子点との間で符号が変われば、その辺上で等線量面と交わる。
+          // 急な勾配では等線量面付近の谷が刻みより細くなり、格子点だけでは見逃すため、交点も調べる。
+          if (t === 0) continue;
+          const nb0 = 6 * m;
+          for (let q = 0; q < 6; q++) {
+            const nb = nbr[nb0 + q];
+            if (nb < 0 || stamp[nb] !== gen) continue;
+            const tn = diffs[nb];
+            if (margin === 0 && (t - tn) * (t - tn) * invD2 > 1) margin = stepN;
+            if (t > 0 ? tn > 0 : tn < 0) continue;
+            const f = t / (t - tn);
+            const px = ox_ + (offX[nb] - ox_) * f;
+            const py = oy_ + (offY[nb] - oy_) * f;
+            const pz = oz_ + (offZ[nb] - oz_) * f;
+            const pr2 = (px * px + py * py + pz * pz) * invDta2;
+            if (pr2 >= best) continue;
+            const dc = sample(x + px, y + py, z + pz);
+            if (dc !== dc) continue;
+            const tc = dc - dr;
+            const gc = pr2 + tc * tc * invD2;
+            if (gc < best) {
+              best = gc;
+              bx = px;
+              by = py;
+              bz = pz;
+            }
           }
         }
 
-        // 格子探索の最良点の周りを、刻みを半分ずつにして局所的に詰める (離散化誤差の低減)
-        if (best > 0 && best < cap2) {
-          let cx = offX[bestM];
-          let cy = offY[bestM];
-          let cz = offZ[bestM];
+        // 最良点の周りを、刻みを半分ずつにして局所的に詰める (離散化誤差の低減)。
+        // 格子上の最良値が上限をわずかに超えていても、詰めると上限を下回ることがあるので 1 刻みぶん広く対象にする
+        if (best > 0 && best < refineLimit) {
+          let cx = bx;
+          let cy = by;
+          let cz = bz;
           let h = step * 0.5;
-          for (let lvl = 0; lvl < REFINE_LEVELS; lvl++, h *= 0.5) {
-            let bx = cx;
-            let by = cy;
-            let bz = cz;
+          // 比較先の格子の外に当たった場合は最小値が境界上にあるので、さらに細かく詰める
+          let edge = false;
+          for (let lvl = 0; lvl < (edge ? REFINE_LEVELS_EDGE : REFINE_LEVELS); lvl++, h *= 0.5) {
+            let nx_ = cx;
+            let ny_ = cy;
+            let nz_ = cz;
             for (let c = -1; c <= 1; c++) {
               for (let b = -1; b <= 1; b++) {
                 for (let a = -1; a <= 1; a++) {
@@ -279,21 +367,24 @@ export function computeSlab(
                   const r2 = (px * px + py * py + pz * pz) * invDta2;
                   if (r2 >= best) continue;
                   const de = sample(x + px, y + py, z + pz);
-                  if (de !== de) continue;
+                  if (de !== de) {
+                    edge = true;
+                    continue;
+                  }
                   const t = de - dr;
                   const g2 = r2 + t * t * invD2;
                   if (g2 < best) {
                     best = g2;
-                    bx = px;
-                    by = py;
-                    bz = pz;
+                    nx_ = px;
+                    ny_ = py;
+                    nz_ = pz;
                   }
                 }
               }
             }
-            cx = bx;
-            cy = by;
-            cz = bz;
+            cx = nx_;
+            cy = ny_;
+            cz = nz_;
           }
         }
         gamma[out] = best >= cap2 ? p.gammaCap : Math.sqrt(best);
@@ -329,8 +420,9 @@ export function computeSlab(
   return { k0, k1, gamma, dd, dta, grad, evalOnRef };
 }
 
-/** 局所詰めの段数 (刻み/2, /4, /8) */
+/** 局所詰めの段数 (刻み/2, /4, /8)。比較先の格子の端では /128 まで */
 const REFINE_LEVELS = 3;
+const REFINE_LEVELS_EDGE = 7;
 
 function diff(d: Float32Array, idx: number, pos: number, len: number, stride: number, h: number): number {
   if (len < 2) return 0;
