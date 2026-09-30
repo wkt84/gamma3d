@@ -70,6 +70,28 @@ export const ja = {
     },
   },
 
+  presets: {
+    title: '条件の保存・読み込み',
+    savedGroup: '保存した条件',
+    standardGroup: '標準の基準',
+    name: 'プリセット名',
+    namePlaceholder: '名前 (例: 施設標準)',
+    save: '現在の条件を保存',
+    delete: '選択中の条件を削除',
+    export: '書き出し (JSON)',
+    import: '読み込み',
+    saved: (name: S) => `「${name}」を保存しました`,
+    overwritten: (name: S) => `「${name}」を上書きしました`,
+    deleted: (name: S) => `「${name}」を削除しました`,
+    nameRequired: '名前を入力してください',
+    invalidParams: (reason: S) => `現在の条件は保存できません: ${reason}`,
+    noneToExport: '保存した条件がありません',
+    exported: (n: N) => `${n} 件を書き出しました`,
+    imported: (n: N, rejected: N) => `${n} 件を読み込みました${rejected ? ` (不正な ${rejected} 件は除外)` : ''}`,
+    importError: 'プリセットのファイルとして読み込めませんでした',
+    notPersistent: 'ブラウザの保存領域が使えないため、保存した条件はこの画面を閉じると消えます',
+  },
+
   run: {
     running: '計算中…',
     done: (seconds: S, workers: N, shared: boolean) => `完了: ${seconds} 秒 (${workers} スレッド${shared ? '' : '、共有メモリなし'})`,

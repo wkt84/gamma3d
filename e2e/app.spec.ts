@@ -112,3 +112,51 @@ test('PDF レポートを出力できる', async ({ page }) => {
   expect(bytes.length).toBeLessThan(2_000_000);
   await expect(page.locator('#pdf-status')).toContainText('出力しました');
 });
+
+test('解析条件をプリセットとして保存・呼び出し・書き出し・削除・読み込みでき、再読み込み後も残る', async ({ page }) => {
+  await page.goto('/');
+  const preset = page.locator('#preset');
+  const status = page.locator('#preset-status');
+  await page.click('.presets summary');
+
+  // 保存
+  await page.fill('#p-dd', '2');
+  await page.fill('#p-dta', '1.5');
+  await page.check('input[name="norm"][value="local"]');
+  await page.fill('#preset-name', '施設標準');
+  await page.click('#preset-save');
+  await expect(status).toContainText('保存しました');
+  await expect(preset).toHaveValue('saved:施設標準');
+
+  // 値を変えると「カスタム」になる
+  await page.fill('#p-dd', '3');
+  await expect(preset).toHaveValue('custom');
+
+  // 再読み込みしても残っていて、選ぶと条件が入る
+  await page.reload();
+  await page.selectOption('#preset', 'saved:施設標準');
+  await expect(page.locator('#p-dd')).toHaveValue('2');
+  await expect(page.locator('#p-dta')).toHaveValue('1.5');
+  await expect(page.locator('input[name="norm"][value="local"]')).toBeChecked();
+
+  // 書き出し
+  await page.click('.presets summary');
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('#preset-export')]);
+  const file = (await download.path())!;
+  const exported = JSON.parse(readFileSync(file, 'utf8'));
+  expect(exported.kind).toBe('gamma3d-presets');
+  expect(exported.presets.map((p: { name: string }) => p.name)).toEqual(['施設標準']);
+
+  // 削除すると選択肢から消え、再読み込み後も戻らない
+  await page.click('#preset-delete');
+  await expect(status).toContainText('削除しました');
+  await expect(preset.locator('option[value="saved:施設標準"]')).toHaveCount(0);
+  await page.reload();
+  await expect(preset.locator('option[value="saved:施設標準"]')).toHaveCount(0);
+
+  // 書き出したファイルを読み込むと戻る
+  await page.click('.presets summary');
+  await page.locator('#preset-file').setInputFiles(file);
+  await expect(status).toContainText('1 件を読み込みました');
+  await expect(preset.locator('option[value="saved:施設標準"]')).toHaveCount(1);
+});

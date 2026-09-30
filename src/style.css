@@ -366,6 +366,34 @@ progress {
   accent-color: var(--accent);
 }
 
+.presets summary {
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.presets[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.preset-row input[type='text'] {
+  flex: 1 1 120px;
+  font-size: 12px;
+}
+
+.preset-row button {
+  font-size: 12px;
+  padding: 5px 10px;
+}
+
 .advanced summary {
   font-size: 12px;
   color: var(--text-secondary);

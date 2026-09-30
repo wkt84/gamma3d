@@ -70,13 +70,29 @@
           <h2 data-i18n="params.title"></h2>
           <label><span data-i18n="params.preset"></span>
             <select id="preset">
-              <option value="3,3">3% / 3 mm</option>
-              <option value="3,2">3% / 2 mm</option>
-              <option value="2,2">2% / 2 mm</option>
-              <option value="1,1">1% / 1 mm</option>
+              <optgroup data-i18n-label="presets.standardGroup">
+                <option value="3,3">3% / 3 mm</option>
+                <option value="3,2">3% / 2 mm</option>
+                <option value="2,2">2% / 2 mm</option>
+                <option value="1,1">1% / 1 mm</option>
+              </optgroup>
               <option value="custom" data-i18n="params.custom"></option>
             </select>
           </label>
+          <details class="presets">
+            <summary data-i18n="presets.title"></summary>
+            <div class="preset-row">
+              <input type="text" id="preset-name" maxlength="60" data-i18n-placeholder="presets.namePlaceholder" data-i18n-aria-label="presets.name" />
+              <button id="preset-save" data-i18n="presets.save"></button>
+            </div>
+            <div class="preset-row">
+              <button id="preset-delete" data-i18n="presets.delete" disabled></button>
+              <button id="preset-export" data-i18n="presets.export"></button>
+              <button id="preset-import" data-i18n="presets.import"></button>
+              <input type="file" id="preset-file" accept=".json,application/json" hidden />
+            </div>
+            <p id="preset-status" class="hint" aria-live="polite"></p>
+          </details>
           <div class="row2">
             <label>DD (%) <input type="number" id="p-dd" value="3" step="0.5" min="0.1" /></label>
             <label>DTA (mm) <input type="number" id="p-dta" value="3" step="0.5" min="0.1" /></label>
