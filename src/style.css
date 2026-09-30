@@ -516,6 +516,8 @@ figure {
   font-size: 12px;
   padding: 8px;
   text-align: center;
+  /* 画像の上に重なるため、マウス操作はキャンバスへ通す */
+  pointer-events: none;
 }
 
 .colorbar {

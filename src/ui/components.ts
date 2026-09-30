@@ -21,6 +21,9 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   return e;
 }
 
+/** ホイール 1 スライス分の移動量 (px) */
+const WHEEL_STEP = 50;
+
 /** 断面を 1 枚表示するパネル (見出し・画像・カラーバー) */
 export class SlicePanel {
   private readonly title: HTMLElement;
@@ -29,7 +32,7 @@ export class SlicePanel {
   private readonly colorbar: HTMLElement;
   private image: SliceImage | null = null;
   private cross: [number, number] | null = null;
-  private dragging = false;
+  private wheelAcc = 0;
 
   onPick: (u: number, v: number) => void = () => {};
   onHover: (uv: [number, number] | null) => void = () => {};
@@ -49,22 +52,31 @@ export class SlicePanel {
 
     new ResizeObserver(() => this.redraw()).observe(body);
 
-    this.canvas.addEventListener('pointerdown', (e) => {
-      this.dragging = true;
-      this.canvas.setPointerCapture(e.pointerId);
-      this.pick(e);
+    // ダブルクリックでその点へ十字カーソルを移動 (= 他の断面の表示位置が変わる)
+    this.canvas.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      const uv = this.hit(e);
+      if (uv) this.onPick(uv[0], uv[1]);
     });
-    this.canvas.addEventListener('pointerup', () => (this.dragging = false));
-    this.canvas.addEventListener('pointermove', (e) => {
-      if (this.dragging) this.pick(e);
-      this.onHover(this.hit(e));
-    });
+    this.canvas.addEventListener('pointermove', (e) => this.onHover(this.hit(e)));
     this.canvas.addEventListener('pointerleave', () => this.onHover(null));
+    // ホイールでスライス送り。マウスのノッチは 1 回 1 スライス、トラックパッドの細かい量は累積して送る
     this.canvas.addEventListener(
       'wheel',
       (e) => {
         e.preventDefault();
-        this.onWheel(Math.sign(e.deltaY));
+        const dy = e.deltaMode === WheelEvent.DOM_DELTA_PIXEL ? e.deltaY : e.deltaY * 40;
+        if (Math.abs(dy) >= WHEEL_STEP) {
+          this.wheelAcc = 0;
+          this.onWheel(Math.sign(dy));
+          return;
+        }
+        this.wheelAcc += dy;
+        while (Math.abs(this.wheelAcc) >= WHEEL_STEP) {
+          const dir = Math.sign(this.wheelAcc);
+          this.wheelAcc -= dir * WHEEL_STEP;
+          this.onWheel(dir);
+        }
       },
       { passive: false },
     );
@@ -118,7 +130,7 @@ export class SlicePanel {
     if (this.image) drawSlice(c.ctx, this.image, c.w, c.h, this.cross);
   }
 
-  private hit(e: PointerEvent): [number, number] | null {
+  private hit(e: MouseEvent): [number, number] | null {
     if (!this.image) return null;
     const rect = this.canvas.getBoundingClientRect();
     const r = fitRect(this.image, rect.width, rect.height);
@@ -126,11 +138,6 @@ export class SlicePanel {
     const v = Math.floor(((e.clientY - rect.top - r.y) / r.h) * this.image.height);
     if (u < 0 || v < 0 || u >= this.image.width || v >= this.image.height) return null;
     return [u, v];
-  }
-
-  private pick(e: PointerEvent): void {
-    const uv = this.hit(e);
-    if (uv) this.onPick(uv[0], uv[1]);
   }
 }
 
