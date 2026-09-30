@@ -1,5 +1,6 @@
 import type { ColorMap } from './colormap.ts';
 import { drawHistogram, themeFromCss, type BarHit, type HistSpec } from './histogram-chart.ts';
+import { drawProfile, type ProfileGeometry, type ProfileSpec } from './profile-chart.ts';
 import { drawSlice, fitRect, type SliceImage } from './slice.ts';
 import { m } from '../i18n/index.ts';
 
@@ -219,6 +220,95 @@ export class HistogramView {
     this.tip.style.top = `${Math.max(4, e.clientY - rect.top - 36)}px`;
     if (this.hover !== best) {
       this.hover = best;
+      this.redraw();
+    }
+  }
+}
+
+/** 線量プロファイル 1 枚 (ホバーで値を表示、ダブルクリックでその点へ十字カーソルを移動) */
+export class ProfileView {
+  private readonly canvas: HTMLCanvasElement;
+  private readonly tip: HTMLElement;
+  private readonly empty: HTMLElement;
+  private readonly fig: HTMLElement;
+  private spec: ProfileSpec | null = null;
+  private geometry: ProfileGeometry | null = null;
+  private hover = -1;
+
+  /** ホバー中の点の説明 (ツールチップの文言) */
+  describe: (spec: ProfileSpec, i: number) => string = () => '';
+  onPick: (i: number) => void = () => {};
+
+  constructor(fig: HTMLElement, emptyText: string) {
+    this.fig = fig;
+    this.canvas = el('canvas');
+    this.tip = el('div', 'tooltip');
+    this.tip.hidden = true;
+    this.empty = el('p', 'empty', emptyText);
+    fig.append(this.canvas, this.tip, this.empty);
+    fig.setAttribute('role', 'img');
+    new ResizeObserver(() => this.redraw()).observe(fig);
+    this.canvas.addEventListener('pointermove', (e) => this.move(e));
+    this.canvas.addEventListener('pointerleave', () => {
+      this.hover = -1;
+      this.tip.hidden = true;
+      this.redraw();
+    });
+    this.canvas.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      const i = this.indexAt(e);
+      if (i >= 0) this.onPick(i);
+    });
+    matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => this.redraw());
+  }
+
+  setEmptyText(t: string): void {
+    this.empty.textContent = t;
+  }
+
+  set(spec: ProfileSpec | null): void {
+    this.spec = spec;
+    this.empty.hidden = !!spec;
+    this.canvas.hidden = !spec;
+    this.fig.setAttribute('aria-label', spec ? spec.title : '');
+    if (spec && this.hover >= spec.positions.length) this.hover = -1;
+    this.redraw();
+    if (spec && this.hover >= 0 && !this.tip.hidden) this.tip.textContent = this.describe(spec, this.hover);
+  }
+
+  redraw(): void {
+    if (!this.spec) return;
+    const c = setupCanvas(this.canvas);
+    if (!c) return;
+    this.geometry = drawProfile(c.ctx, c.w, c.h, this.spec, themeFromCss(this.fig), this.hover);
+  }
+
+  private indexAt(e: MouseEvent): number {
+    if (!this.spec || !this.geometry) return -1;
+    const x = e.clientX - this.canvas.getBoundingClientRect().left;
+    if (x < this.geometry.x0 - 8 || x > this.geometry.x1 + 8) return -1;
+    return this.geometry.indexAt(x);
+  }
+
+  private move(e: PointerEvent): void {
+    const i = this.indexAt(e);
+    if (i < 0 || !this.spec) {
+      this.tip.hidden = true;
+      if (this.hover !== -1) {
+        this.hover = -1;
+        this.redraw();
+      }
+      return;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    this.tip.hidden = false;
+    this.tip.textContent = this.describe(this.spec, i);
+    const tw = this.tip.offsetWidth;
+    const x = e.clientX - rect.left;
+    this.tip.style.left = `${Math.min(rect.width - tw - 4, Math.max(4, x + 12))}px`;
+    this.tip.style.top = `${Math.max(4, e.clientY - rect.top - 36)}px`;
+    if (this.hover !== i) {
+      this.hover = i;
       this.redraw();
     }
   }

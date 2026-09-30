@@ -8,7 +8,9 @@ import { buildDoseSets, scaled, scaleFactor, type DoseScale, type DoseSet } from
 import { parseRtDose, peekModality, type RtDose } from './dicom/rtdose.ts';
 import { parseRtPlan, type RtPlan } from './dicom/rtplan.ts';
 import { ddColorMap, doseColorMap, dtaColorMap, gammaColorMap, gradientColorMap, type ColorMap } from './ui/colormap.ts';
-import { HistogramView, SlicePanel } from './ui/components.ts';
+import { HistogramView, ProfileView, SlicePanel } from './ui/components.ts';
+import { extractProfile } from './ui/profile.ts';
+import type { ProfileSpec } from './ui/profile-chart.ts';
 import { derive, histSpecs, type DdUnit, type Derived } from './ui/results.ts';
 import { imageToVoxel, PLANES, renderSlice, voxelToImage, type Ijk, type Plane } from './ui/slice.ts';
 import {
@@ -138,6 +140,9 @@ const panelEval = new SlicePanel($('#panel-eval'), '');
 const panelMap = new SlicePanel($('#panel-map'), '', mapHead);
 const panels = [panelRef, panelEval, panelMap];
 const charts = [new HistogramView($('#chart-dd'), ''), new HistogramView($('#chart-dta'), ''), new HistogramView($('#chart-gamma'), '')];
+const AXES = [0, 1, 2] as const;
+const profiles = AXES.map((a) => new ProfileView($(`#profile-${'xyz'[a]}`), ''));
+let showProfiles = false;
 
 const slider = $<HTMLInputElement>('#slice');
 const sliceLabel = $('#slice-label');
@@ -156,6 +161,7 @@ function localizeStatic(): void {
   charts[0].setEmptyText(v.histEmpty.dd);
   charts[1].setEmptyText(v.histEmpty.dta);
   charts[2].setEmptyText(v.histEmpty.gamma);
+  profiles.forEach((p) => p.setEmptyText(m().profile.empty));
 }
 localizeStatic();
 
@@ -209,6 +215,66 @@ function renderViews(): void {
   const pos = grid.origin[w] + cursor[w] * grid.spacing[w];
   sliceLabel.textContent = `${cursor[w] + 1}/${grid.dims[w]}  ${'xyz'[w]} = ${pos.toFixed(1)} mm`;
   showReadout(cursor);
+  renderProfiles();
+}
+
+/** 十字カーソルを通る x・y・z 方向の線量プロファイル (γ は解析後に下の帯へ) */
+function renderProfiles(): void {
+  if (!showProfiles) return;
+  if (!display) {
+    profiles.forEach((p) => p.set(null));
+    return;
+  }
+  const grid = display.ref;
+  const t = m().profile;
+  for (const axis of AXES) {
+    const pr = extractProfile(grid, [grid.data, display.evalOnRef, result?.gamma ?? null], cursor, axis);
+    const [refV, evalV, gammaV] = pr.values;
+    const others = AXES.filter((a) => a !== axis).map((a) => `${'xyz'[a]} = ${(grid.origin[a] + cursor[a] * grid.spacing[a]).toFixed(1)}`);
+    const spec: ProfileSpec = {
+      title: t.title('xyz'[axis], others[0], others[1]),
+      xLabel: t.xLabel('xyz'[axis]),
+      positions: pr.positions,
+      cursorIndex: pr.cursorIndex,
+      series: [
+        { label: t.ref, values: refV!, color: 'series1', dashed: false },
+        ...(evalV ? [{ label: t.eval, values: evalV, color: 'series2' as const, dashed: true }] : []),
+      ],
+      doseMax: display.max,
+      doseUnit: 'Gy',
+      gamma: gammaV && result ? { values: gammaV, cap: result.params.gammaCap, label: 'γ' } : null,
+    };
+    profiles[axis].set(spec);
+  }
+}
+
+profiles.forEach((view, axis) => {
+  view.describe = (spec, i) => {
+    const f = (v: number, d: number) => (Number.isNaN(v) ? '–' : v.toFixed(d));
+    const parts = [`${'xyz'[axis]} = ${spec.positions[i].toFixed(1)} mm`];
+    for (const s of spec.series) parts.push(`${s.label} ${f(s.values[i], 3)} Gy`);
+    if (spec.gamma) parts.push(`γ ${f(spec.gamma.values[i], 2)}`);
+    return parts.join(m().viewer.separator);
+  };
+  view.onPick = (i) => {
+    if (!display) return;
+    cursor[axis] = i;
+    syncSlider();
+    renderViews();
+  };
+});
+
+const gridEl = $('.grid');
+for (const b of $$<HTMLButtonElement>('.bottom-view button')) {
+  b.addEventListener('click', () => {
+    showProfiles = b.dataset.bottom === 'profile';
+    gridEl.classList.toggle('show-profiles', showProfiles);
+    $$<HTMLButtonElement>('.bottom-view button').forEach((x) => {
+      x.classList.toggle('active', x === b);
+      x.setAttribute('aria-pressed', String(x === b));
+    });
+    renderProfiles();
+  });
 }
 
 function renderCharts(): void {

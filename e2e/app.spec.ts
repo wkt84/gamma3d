@@ -380,3 +380,32 @@ test('英語の PDF は小さい英字用フォントで作り、データに日
   await Promise.all([page.waitForEvent('download', { timeout: 60_000 }), page.click('#pdf')]);
   expect(fonts.sort()).toEqual(['NotoSansJP-Bold.ttf', 'NotoSansJP-Regular.ttf']);
 });
+
+test('下段をプロファイルに切り替えると x・y・z のプロファイルが出て、ダブルクリックで十字カーソルが移動する', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await load(page);
+  await expect(page.locator('#profile-x')).toBeHidden();
+  await page.click('.bottom-view button[data-bottom="profile"]');
+  await expect(page.locator('#chart-dd')).toBeHidden();
+  for (const a of ['x', 'y', 'z']) await expect(page.locator(`#profile-${a} canvas`)).toBeVisible();
+  await expect(page.locator('#profile-x')).toHaveAttribute('aria-label', /^x プロファイル \(y = .+, z = .+ mm\)$/);
+
+  // Axial 表示では z 方向のプロファイル上の位置がスライスになる
+  await expect(sliceLabel(page)).toHaveText(/^32\/64/);
+  const box = (await page.locator('#profile-z canvas').boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5);
+  await expect(page.locator('#profile-z .tooltip')).toContainText('z = ');
+  await page.mouse.dblclick(box.x + box.width * 0.3, box.y + box.height * 0.5);
+  const moved = Number((await sliceLabel(page).textContent())!.split('/')[0]);
+  expect(moved).toBeLessThan(32);
+  // 断面側でスライスを送ると、x プロファイルの見出し (z 座標) が追従する
+  const before = await page.locator('#profile-x').getAttribute('aria-label');
+  await page.locator('#slice').fill('40');
+  await expect(page.locator('#profile-x')).not.toHaveAttribute('aria-label', before!);
+
+  await analyze(page);
+  await page.click('.bottom-view button[data-bottom="hist"]');
+  await expect(page.locator('#chart-gamma canvas')).toBeVisible();
+  expect(errors).toEqual([]);
+});

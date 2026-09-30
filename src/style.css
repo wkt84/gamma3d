@@ -13,6 +13,8 @@
   --accent-ink: #ffffff;
   --chart-pass: #3987e5;
   --chart-fail: #d03b3b;
+  --series-1: #3987e5;
+  --series-2: #d95926;
   --good: #0ca30c;
   --warning: #fab219;
   --critical: #d03b3b;
@@ -37,6 +39,8 @@
     --axis: #c3c2b7;
     --accent: #2a78d6;
     --chart-pass: #2a78d6;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
     --good: #006300;
     color-scheme: light;
   }
@@ -660,6 +664,12 @@ table.compare .judgment {
   grid-template-rows: minmax(280px, 1.35fr) minmax(220px, 1fr);
   gap: 10px;
   min-height: 560px;
+}
+
+/* 下段はヒストグラムかプロファイルのどちらかを表示する */
+.grid:not(.show-profiles) .chart.profile,
+.grid.show-profiles .chart.hist {
+  display: none;
 }
 
 figure {

@@ -179,6 +179,10 @@
             <input type="range" id="slice" min="0" max="0" value="0" />
             <span id="slice-label">–</span>
           </label>
+          <div class="segmented bottom-view" role="group" data-i18n-aria-label="viewer.bottomView">
+            <button data-bottom="hist" class="active" aria-pressed="true" data-i18n="viewer.histograms"></button>
+            <button data-bottom="profile" aria-pressed="false" data-i18n="viewer.profiles"></button>
+          </div>
           <span class="hint" data-i18n="viewer.hint"></span>
           <span class="readout" id="readout"></span>
         </div>
@@ -187,9 +191,12 @@
           <figure class="panel" id="panel-ref"></figure>
           <figure class="panel" id="panel-eval"></figure>
           <figure class="panel" id="panel-map"></figure>
-          <figure class="chart" id="chart-dd"></figure>
-          <figure class="chart" id="chart-dta"></figure>
-          <figure class="chart" id="chart-gamma"></figure>
+          <figure class="chart hist" id="chart-dd"></figure>
+          <figure class="chart hist" id="chart-dta"></figure>
+          <figure class="chart hist" id="chart-gamma"></figure>
+          <figure class="chart profile" id="profile-x"></figure>
+          <figure class="chart profile" id="profile-y"></figure>
+          <figure class="chart profile" id="profile-z"></figure>
         </div>
       </main>
     </div>
