@@ -15,6 +15,7 @@ export const ja = {
     meta: (version: S) => `v${version} ・ データはブラウザ内でのみ処理されます`,
     inputPane: 'データ入力',
     resultPane: '解析結果',
+    language: '言語',
   },
 
   side: {

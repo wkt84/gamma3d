@@ -11,7 +11,10 @@
     <!-- 文言は src/i18n の辞書から data-i18n* 属性のキーで流し込む -->
     <header class="app-header">
       <h1>Gamma3D <span class="subtitle" data-i18n="app.subtitle"></span></h1>
-      <span class="meta" id="app-meta"></span>
+      <div class="header-end">
+        <span class="meta" id="app-meta"></span>
+        <select id="lang" data-i18n-aria-label="app.language"></select>
+      </div>
     </header>
 
     <div class="layout">

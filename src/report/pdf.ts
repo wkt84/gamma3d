@@ -9,7 +9,7 @@ import type { Vec3 } from '../core/volume.ts';
 import { judge, type ActionLevels, type Judgment } from '../core/judgment.ts';
 import type { GammaStats } from '../core/stats.ts';
 import type { RtPlan } from '../dicom/rtplan.ts';
-import { m, text as msgText, type Msg } from '../i18n/index.ts';
+import { LocalizedError, m, text as msgText, type Msg } from '../i18n/index.ts';
 
 export interface ReportSide {
   set: DoseSet;
@@ -39,7 +39,39 @@ export interface ReportInput {
 }
 
 const FONT = 'NotoSansJP';
-let fontCache: Promise<{ regular: string; bold: string }> | null = null;
+
+/**
+ * PDF に埋め込むフォント。full は Noto Sans JP (約 5MB ×2)、latin はそこから U+0000–U+2FFF
+ * (ラテン文字・ギリシャ文字・記号) だけを取り出したもの (約 240KB ×2、scripts/subset-fonts.sh で作る)。
+ */
+export type FontSet = 'full' | 'latin';
+const FONT_FILES: Record<FontSet, [string, string]> = {
+  full: ['NotoSansJP-Regular.ttf', 'NotoSansJP-Bold.ttf'],
+  latin: ['NotoSansJP-Latin-Regular.ttf', 'NotoSansJP-Latin-Bold.ttf'],
+};
+/** latin のフォントにない文字 (かな・漢字・ハングル・全角記号・絵文字など) */
+const OUTSIDE_LATIN = /[^\x00-\u2fff]/;
+/** 文言が latin のフォントで足りる言語 */
+const LATIN_LANGS: readonly string[] = ['en'];
+
+/** レポートに載るデータ由来の文字列 (患者名・プラン名・警告・コメントなど) */
+function dataStrings(input: ReportInput): string[] {
+  const side = (s: ReportSide) => [
+    msgText(s.set.label),
+    msgText(s.set.summary),
+    s.set.patientName,
+    s.set.patientId,
+    ...(s.plan ? [s.plan.label, s.plan.name, s.plan.fileName] : []),
+  ];
+  return [...side(input.ref), ...side(input.ev), ...input.warnings.map(msgText), input.reviewer, input.comment];
+}
+
+/** 使うフォント: 現在の言語が latin で足り、データにもそれ以外の文字がなければ latin */
+export function fontSetFor(lang: string, strings: readonly string[]): FontSet {
+  return LATIN_LANGS.includes(lang) && !strings.some((s) => OUTSIDE_LATIN.test(s)) ? 'latin' : 'full';
+}
+
+const fontCache = new Map<FontSet, Promise<{ regular: string; bold: string }>>();
 
 function toBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
@@ -49,21 +81,25 @@ function toBase64(buf: ArrayBuffer): string {
   return btoa(s);
 }
 
-/** 日本語フォントは PDF 出力時に初めて読み込む (約 5MB ×2、以後はキャッシュ) */
-function loadFonts(): Promise<{ regular: string; bold: string }> {
-  fontCache ??= (async () => {
-    const get = async (file: string) => {
-      const res = await fetch(`${import.meta.env.BASE_URL}fonts/${file}`);
-      if (!res.ok) throw new Error(m().report.fontError(file));
-      return toBase64(await res.arrayBuffer());
-    };
-    const [regular, bold] = await Promise.all([get('NotoSansJP-Regular.ttf'), get('NotoSansJP-Bold.ttf')]);
-    return { regular, bold };
-  })().catch((e) => {
-    fontCache = null;
-    throw e;
-  });
-  return fontCache;
+/** フォントは PDF 出力時に初めて読み込む (以後はキャッシュ) */
+function loadFonts(set: FontSet): Promise<{ regular: string; bold: string }> {
+  let p = fontCache.get(set);
+  if (!p) {
+    p = (async () => {
+      const get = async (file: string) => {
+        const res = await fetch(`${import.meta.env.BASE_URL}fonts/${file}`);
+        if (!res.ok) throw new LocalizedError((t) => t.report.fontError(file));
+        return toBase64(await res.arrayBuffer());
+      };
+      const [regular, bold] = await Promise.all(FONT_FILES[set].map(get));
+      return { regular, bold };
+    })().catch((e) => {
+      fontCache.delete(set);
+      throw e;
+    });
+    fontCache.set(set, p);
+  }
+  return p;
 }
 
 const fmt = (v: number, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '–');
@@ -87,12 +123,14 @@ function colorbarPng(cmap: ColorMap): string {
 }
 
 export async function generateReport(input: ReportInput): Promise<Blob> {
-  const [{ jsPDF }, fonts] = await Promise.all([import('jspdf'), loadFonts()]);
+  const fontSet = fontSetFor(m().lang, dataStrings(input));
+  const [{ jsPDF }, fonts] = await Promise.all([import('jspdf'), loadFonts(fontSet)]);
   const doc: JsPDF = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
-  doc.addFileToVFS('NotoSansJP-Regular.ttf', fonts.regular);
-  doc.addFont('NotoSansJP-Regular.ttf', FONT, 'normal');
-  doc.addFileToVFS('NotoSansJP-Bold.ttf', fonts.bold);
-  doc.addFont('NotoSansJP-Bold.ttf', FONT, 'bold');
+  const [regularFile, boldFile] = FONT_FILES[fontSet];
+  doc.addFileToVFS(regularFile, fonts.regular);
+  doc.addFont(regularFile, FONT, 'normal');
+  doc.addFileToVFS(boldFile, fonts.bold);
+  doc.addFont(boldFile, FONT, 'bold');
 
   const { result: r, derived: d } = input;
   const p = r.params;
@@ -118,9 +156,11 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
     return y + 9;
   };
 
-  /** key-value の表を cols 列で並べ、下端の y を返す (値は折り返し可) */
-  const kvTable = (rows: [string, string][], y0: number, cols = 1, keyW = 28): number => {
+  /** key-value の表を cols 列で並べ、下端の y を返す (値は折り返し可)。キーの列幅は minKeyW 以上で、最も長いキーに合わせる */
+  const kvTable = (rows: [string, string][], y0: number, cols = 1, minKeyW = 28): number => {
     const colW = CW / cols;
+    doc.setFont(FONT, 'normal').setFontSize(8.5);
+    const keyW = Math.max(minKeyW, ...rows.map(([k]) => doc.getTextWidth(k) + 3));
     let rowTop = y0;
     for (let i = 0; i < rows.length; i += cols) {
       let rowBottom = rowTop;
@@ -391,11 +431,13 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
   }
   y += 31;
   ink(40);
+  // 署名欄: 下線はラベルの直後から引く
   text(t.reviewer, M, y, 9);
-  doc.line(M + 14, y + 5, M + 90, y + 5);
-  if (input.reviewer) text(input.reviewer, M + 16, y, 10);
+  const reviewerX = M + doc.getTextWidth(t.reviewer) + 3;
+  doc.line(reviewerX, y + 5, M + 90, y + 5);
+  if (input.reviewer) text(input.reviewer, reviewerX + 2, y, 10);
   text(t.reviewDate, M + 100, y, 9);
-  doc.line(M + 114, y + 5, W - M, y + 5);
+  doc.line(M + 100 + doc.getTextWidth(t.reviewDate) + 3, y + 5, W - M, y + 5);
 
   // フッター
   const pages = doc.getNumberOfPages();

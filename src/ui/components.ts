@@ -170,6 +170,10 @@ export class HistogramView {
     matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => this.redraw());
   }
 
+  setEmptyText(t: string): void {
+    this.empty.textContent = t;
+  }
+
   set(spec: HistSpec | null): void {
     this.spec = spec;
     this.empty.hidden = !!spec;

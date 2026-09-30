@@ -11,7 +11,22 @@ import { ddColorMap, doseColorMap, dtaColorMap, gammaColorMap, gradientColorMap,
 import { HistogramView, SlicePanel } from './ui/components.ts';
 import { derive, histSpecs, type DdUnit, type Derived } from './ui/results.ts';
 import { imageToVoxel, PLANES, renderSlice, voxelToImage, type Ijk, type Plane } from './ui/slice.ts';
-import { applyTranslations, errorMsg, m, text, type Messages, type Msg } from './i18n/index.ts';
+import {
+  applyTranslations,
+  currentLang,
+  errorMsg,
+  initialLang,
+  LANGUAGES,
+  LocalizedError,
+  m,
+  onLangChange,
+  setLang,
+  setMessages,
+  text,
+  type Lang,
+  type Messages,
+  type Msg,
+} from './i18n/index.ts';
 import {
   browserStorage,
   normalizeName,
@@ -71,17 +86,46 @@ let abort: AbortController | null = null;
 
 const BG: [number, number, number] = [10, 10, 10];
 
+// ───────── 言語 ─────────
+
+const LANG_KEY = 'gamma3d.lang';
+function savedLang(): string | null {
+  try {
+    return localStorage.getItem(LANG_KEY);
+  } catch {
+    return null;
+  }
+}
+setMessages(LANGUAGES[initialLang(location.search, savedLang(), navigator.languages ?? [navigator.language])].messages);
 applyTranslations();
+
+const langSelect = $<HTMLSelectElement>('#lang');
+for (const [key, { name }] of Object.entries(LANGUAGES)) langSelect.add(new Option(name, key));
+langSelect.value = currentLang();
+langSelect.addEventListener('change', () => {
+  const lang = langSelect.value as Lang;
+  try {
+    localStorage.setItem(LANG_KEY, lang);
+  } catch {
+    // 保存できなくても、この画面では切り替える
+  }
+  setLang(lang);
+});
+
+/** 状態表示の欄と、その文言 (言語を切り替えたら作り直す) */
+const statusMsgs = new Map<HTMLElement, Msg>();
+function setStatus(el: HTMLElement, msg: Msg | null): void {
+  if (msg) statusMsgs.set(el, msg);
+  else statusMsgs.delete(el);
+  el.textContent = msg ? text(msg) : '';
+}
 
 // ───────── ビュー ─────────
 
+const MAP_MODES = ['gamma', 'dd', 'dta', 'grad'] as const;
 const mapSelect = document.createElement('select');
-mapSelect.setAttribute('aria-label', m().viewer.mapType);
-for (const v of ['gamma', 'dd', 'dta', 'grad'] as const) {
-  mapSelect.add(new Option(m().viewer.maps[v], v));
-}
+for (const v of MAP_MODES) mapSelect.add(new Option('', v));
 const ddUnitSelect = document.createElement('select');
-ddUnitSelect.setAttribute('aria-label', m().viewer.ddUnit);
 ddUnitSelect.add(new Option('%', 'percent'));
 ddUnitSelect.add(new Option('Gy', 'gy'));
 const mapHead = document.createElement('span');
@@ -89,21 +133,31 @@ mapHead.style.display = 'flex';
 mapHead.style.gap = '6px';
 mapHead.append(mapSelect, ddUnitSelect);
 
-const panelRef = new SlicePanel($('#panel-ref'), m().viewer.refPanel);
-const panelEval = new SlicePanel($('#panel-eval'), m().viewer.evalPanel);
-const panelMap = new SlicePanel($('#panel-map'), m().viewer.mapPanel, mapHead);
+const panelRef = new SlicePanel($('#panel-ref'), '');
+const panelEval = new SlicePanel($('#panel-eval'), '');
+const panelMap = new SlicePanel($('#panel-map'), '', mapHead);
 const panels = [panelRef, panelEval, panelMap];
-const charts = [
-  new HistogramView($('#chart-dd'), m().viewer.histEmpty.dd),
-  new HistogramView($('#chart-dta'), m().viewer.histEmpty.dta),
-  new HistogramView($('#chart-gamma'), m().viewer.histEmpty.gamma),
-];
+const charts = [new HistogramView($('#chart-dd'), ''), new HistogramView($('#chart-dta'), ''), new HistogramView($('#chart-gamma'), '')];
 
 const slider = $<HTMLInputElement>('#slice');
 const sliceLabel = $('#slice-label');
 const readout = $('#readout');
 
-$('#app-meta').textContent = m().app.meta(__APP_VERSION__);
+/** 画面で組み立てる固定の文言 (HTML の data-i18n 以外) を現在の言語で入れる */
+function localizeStatic(): void {
+  const v = m().viewer;
+  $('#app-meta').textContent = m().app.meta(__APP_VERSION__);
+  mapSelect.setAttribute('aria-label', v.mapType);
+  MAP_MODES.forEach((mode, i) => (mapSelect.options[i].text = v.maps[mode]));
+  ddUnitSelect.setAttribute('aria-label', v.ddUnit);
+  panelRef.setTitle(v.refPanel);
+  panelEval.setTitle(v.evalPanel);
+  panelMap.setTitle(v.mapPanel);
+  charts[0].setEmptyText(v.histEmpty.dd);
+  charts[1].setEmptyText(v.histEmpty.dta);
+  charts[2].setEmptyText(v.histEmpty.gamma);
+}
+localizeStatic();
 
 function currentMap(): { values: ArrayLike<number>; cmap: ColorMap } | null {
   if (!result || !derived) return null;
@@ -387,7 +441,7 @@ function evalVolume(set: DoseSet): Volume {
 
 /** データ・係数が変わったとき: 結果を破棄して表示を作り直す */
 function onDataChanged(resetCursor: boolean): void {
-  if (result) runStatus.textContent = '';
+  if (result) setStatus(runStatus, null);
   results = [];
   resultStats = [];
   result = null;
@@ -531,7 +585,7 @@ normAuto.addEventListener('change', () => {
 function markStale(): void {
   if (result && !stale) {
     stale = true;
-    $('#run-status').textContent = m().run.stale;
+    setStatus($('#run-status'), (t) => t.run.stale);
   }
 }
 
@@ -586,19 +640,19 @@ function applyForm(p: PresetParams): void {
 
 /** 条件を検証し、不正なら理由を投げる。requireNormDose: 基準線量の値まで確かめるか (解析実行時) */
 function checkForm(p: PresetParams, requireNormDose: boolean): void {
-  const bad = (cond: boolean, msg: string) => {
-    if (cond) throw new Error(msg);
+  type Key = keyof Messages['params']['invalid'];
+  const bad = (cond: boolean, key: Key) => {
+    if (cond) throw new LocalizedError((t) => t.params.invalid[key]);
   };
-  const e = m().params.invalid;
-  bad(!(p.ddPercent > 0), e.dd);
-  bad(!(p.dtaMm > 0), e.dta);
-  if (requireNormDose || !p.normAuto) bad(!(num('#p-normdose') > 0), e.normDose);
-  bad(!(p.gammaThresholdPercent >= 0 && p.gammaThresholdPercent < 100), e.gammaThreshold);
-  bad(!(p.ddThresholdPercent >= 0 && p.ddThresholdPercent < 100), e.ddThreshold);
-  bad(!(p.gradientThresholdPercentPerMm >= 0), e.gradient);
-  bad(!(p.gammaCap >= 1 && p.gammaCap <= 3), e.cap);
-  bad(!(p.stepsPerDta >= 2 && p.stepsPerDta <= 20), e.steps);
-  bad(!validLevels({ tolerance: p.toleranceLevel, action: p.actionLevel }), e.levels);
+  bad(!(p.ddPercent > 0), 'dd');
+  bad(!(p.dtaMm > 0), 'dta');
+  if (requireNormDose || !p.normAuto) bad(!(num('#p-normdose') > 0), 'normDose');
+  bad(!(p.gammaThresholdPercent >= 0 && p.gammaThresholdPercent < 100), 'gammaThreshold');
+  bad(!(p.ddThresholdPercent >= 0 && p.ddThresholdPercent < 100), 'ddThreshold');
+  bad(!(p.gradientThresholdPercentPerMm >= 0), 'gradient');
+  bad(!(p.gammaCap >= 1 && p.gammaCap <= 3), 'cap');
+  bad(!(p.stepsPerDta >= 2 && p.stepsPerDta <= 20), 'steps');
+  bad(!validLevels({ tolerance: p.toleranceLevel, action: p.actionLevel }), 'levels');
 }
 
 function readParams(): AnalysisParams {
@@ -613,7 +667,6 @@ function readParams(): AnalysisParams {
 const SAVED_PREFIX = 'saved:';
 const presetStore = new PresetStore(browserStorage());
 const savedGroup = document.createElement('optgroup');
-savedGroup.label = m().presets.savedGroup;
 preset.insertBefore(savedGroup, preset.querySelector('option[value="custom"]'));
 const presetStatus = $('#preset-status');
 const presetDelete = $<HTMLButtonElement>('#preset-delete');
@@ -663,17 +716,17 @@ $$<HTMLInputElement>('.params input').forEach((i) => {
 });
 
 $('#preset-save').addEventListener('click', () => {
-  const t = m().presets;
   const name = normalizeName($<HTMLInputElement>('#preset-name').value);
   if (!name) {
-    presetStatus.textContent = t.nameRequired;
+    setStatus(presetStatus, (t) => t.presets.nameRequired);
     return;
   }
   const f = formValues();
   try {
     checkForm(f, false);
   } catch (e) {
-    presetStatus.textContent = t.invalidParams((e as Error).message);
+    const reason = errorMsg(e);
+    setStatus(presetStatus, (t) => t.presets.invalidParams(reason(t)));
     return;
   }
   const params = validateParams(f);
@@ -681,7 +734,7 @@ $('#preset-save').addEventListener('click', () => {
   const existed = !!presetStore.get(name);
   presetStore.save(name, params);
   renderPresetOptions(SAVED_PREFIX + name);
-  presetStatus.textContent = existed ? t.overwritten(name) : t.saved(name);
+  setStatus(presetStatus, (t) => (existed ? t.presets.overwritten(name) : t.presets.saved(name)));
 });
 
 presetDelete.addEventListener('click', () => {
@@ -690,14 +743,13 @@ presetDelete.addEventListener('click', () => {
   presetStore.remove(name);
   renderPresetOptions();
   syncPresetSelect();
-  presetStatus.textContent = m().presets.deleted(name);
+  setStatus(presetStatus, (t) => t.presets.deleted(name));
 });
 
 $('#preset-export').addEventListener('click', () => {
-  const t = m().presets;
   const all = presetStore.all();
   if (!all.length) {
-    presetStatus.textContent = t.noneToExport;
+    setStatus(presetStatus, (t) => t.presets.noneToExport);
     return;
   }
   const url = URL.createObjectURL(new Blob([serializePresets(all)], { type: 'application/json' }));
@@ -706,7 +758,7 @@ $('#preset-export').addEventListener('click', () => {
   a.download = 'gamma3d-presets.json';
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  presetStatus.textContent = t.exported(all.length);
+  setStatus(presetStatus, (t) => t.presets.exported(all.length));
 });
 
 const presetFile = $<HTMLInputElement>('#preset-file');
@@ -715,20 +767,19 @@ presetFile.addEventListener('change', async () => {
   const file = presetFile.files?.[0];
   presetFile.value = '';
   if (!file) return;
-  const t = m().presets;
   try {
     const { presets, rejected } = parsePresetFile(await file.text());
     presetStore.import(presets);
     renderPresetOptions();
     syncPresetSelect();
-    presetStatus.textContent = t.imported(presets.length, rejected);
+    setStatus(presetStatus, (t) => t.presets.imported(presets.length, rejected));
   } catch {
-    presetStatus.textContent = t.importError;
+    setStatus(presetStatus, (t) => t.presets.importError);
   }
 });
 
 renderPresetOptions();
-if (!presetStore.persistent) presetStatus.textContent = m().presets.notPersistent;
+if (!presetStore.persistent) setStatus(presetStatus, (t) => t.presets.notPersistent);
 
 // ───────── 解析実行 ─────────
 
@@ -752,13 +803,13 @@ runBtn.addEventListener('click', async () => {
   try {
     params = readParams();
   } catch (e) {
-    runStatus.textContent = (e as Error).message;
+    setStatus(runStatus, errorMsg(e));
     return;
   }
   abort = new AbortController();
   progress.hidden = false;
   progress.value = 0;
-  runStatus.textContent = m().run.running;
+  setStatus(runStatus, (t) => t.run.running);
   updateButtons();
   try {
     const ev = evalVolume(sides.eval.selected);
@@ -768,11 +819,13 @@ runBtn.addEventListener('click', async () => {
     resultStats = results.map((r) => gammaStats(r.gamma, r.params.gammaCap));
     stale = false;
     const r0 = results[0];
-    runStatus.textContent = m().run.done((r0.elapsedMs / 1000).toFixed(1), r0.workers, r0.sharedMemory, m().run.engine[r0.engine], results.length);
+    const n = results.length;
+    setStatus(runStatus, (t) => t.run.done((r0.elapsedMs / 1000).toFixed(1), r0.workers, r0.sharedMemory, t.run.engine[r0.engine], n));
     // 入力欄の条件と同じものがあればそれを、なければ最初の条件を表示する
     selectResult(Math.max(0, list.findIndex((p) => p.ddPercent === params.ddPercent && p.dtaMm === params.dtaMm)));
   } catch (e) {
-    runStatus.textContent = e instanceof AnalysisCancelled ? m().run.cancelled : m().run.error((e as Error).message);
+    const err = errorMsg(e);
+    setStatus(runStatus, e instanceof AnalysisCancelled ? (t) => t.run.cancelled : (t) => t.run.error(err(t)));
   } finally {
     abort = null;
     progress.hidden = true;
@@ -953,7 +1006,7 @@ pdfBtn.addEventListener('click', async () => {
   if (!result || !derived || !display || !sides.ref.selected || !sides.eval.selected) return;
   const status = $('#pdf-status');
   pdfBtn.disabled = true;
-  status.textContent = m().report.creating;
+  setStatus(status, (t) => t.report.creating);
   try {
     const { generateReport, reportFileName } = await import('./report/pdf.ts');
     const input = {
@@ -980,15 +1033,33 @@ pdfBtn.addEventListener('click', async () => {
     a.download = reportFileName(input);
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    status.textContent = m().report.done(a.download);
+    const file = a.download;
+    setStatus(status, (t) => t.report.done(file));
   } catch (e) {
-    status.textContent = m().run.error((e as Error).message);
+    const err = errorMsg(e);
+    setStatus(status, (t) => t.run.error(err(t)));
   } finally {
     updateButtons();
   }
 });
 
+// 言語の切り替え: 文言を入れ直し、表示中のものを作り直す
+onLangChange(() => {
+  applyTranslations();
+  localizeStatic();
+  savedGroup.label = m().presets.savedGroup;
+  for (const side of Object.values(sides)) {
+    if (side.fileCount) renderSide(side);
+    scaleOf(side);
+  }
+  renderViews();
+  renderCharts();
+  renderSummary();
+  for (const [el, msg] of statusMsgs) el.textContent = text(msg);
+});
+
 // 初期表示
+savedGroup.label = m().presets.savedGroup;
 renderViews();
 renderSummary();
 renderCharts();
