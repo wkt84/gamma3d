@@ -71,6 +71,10 @@ public/fonts Noto Sans JP (SIL Open Font License、OFL.txt 同梱)
 
 GitHub リポジトリを Vercel に接続すると、`main` への push で自動デプロイされます。ビルド設定とヘッダーは `vercel.json` に定義してあり、Node のバージョンは `package.json` の `engines` (24.x) で指定しています。
 
+## 今後の予定
+
+[ROADMAP.md](ROADMAP.md) を参照してください。
+
 ## ライセンス
 
 [MIT License](LICENSE)
