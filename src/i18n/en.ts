@@ -140,6 +140,19 @@ export const en: Messages = {
     fontError: (file: S) => `Could not load the font (${file})`,
   },
 
+  export: {
+    title: 'Export results',
+    includePatient: 'Include patient information',
+    csv: 'CSV',
+    csvTitle: 'Statistics and criteria as a table with one row per criterion (for aggregation)',
+    json: 'JSON',
+    jsonTitle: 'Statistics, criteria and data details as JSON',
+    maps: 'Maps (NRRD)',
+    mapsTitle: 'Gamma, dose difference, DTA and dose maps as NRRD (opens in 3D Slicer and others), bundled in a ZIP',
+    creating: 'Exporting…',
+    done: (file: S) => `Saved ${file}`,
+  },
+
   viewer: {
     plane: 'Plane',
     slice: 'Slice',

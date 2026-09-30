@@ -799,6 +799,16 @@ figure {
   width: 100%;
 }
 
+.export-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.export-buttons button {
+  flex: 1 1 auto;
+}
+
 .zoom-chip {
   font-size: 12px;
   padding: 4px 10px;
