@@ -112,6 +112,20 @@ export function buildDoseSets(doses: RtDose[]): DoseSet[] {
   return sets.sort((a, b) => order[a.kind] - order[b.kind]);
 }
 
+/** 線量に掛ける係数 (num / den)。PLAN を 1 回分にするときは 1 / 分割回数 など。 */
+export interface DoseScale {
+  num: number;
+  den: number;
+}
+
+export const scaleFactor = (s: DoseScale): number => s.num / s.den;
+
+export function formatScale(s: DoseScale): string {
+  const f = scaleFactor(s);
+  const v = Number(f.toPrecision(6));
+  return s.den === 1 ? `×${s.num}` : `×${s.num}/${s.den} (= ${v})`;
+}
+
 /** 係数を掛けた体積を返す (係数 1 ならそのまま)。 */
 export function scaled(v: Volume, factor: number): Volume {
   if (factor === 1) return v;

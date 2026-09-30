@@ -27,7 +27,15 @@
             <label>線量 <select class="set-select"></select></label>
             <p class="set-summary"></p>
             <details class="file-list"><summary></summary><ul></ul></details>
-            <label class="inline">係数 <input type="number" class="scale" value="1" step="0.01" min="0" /> <span class="hint">(分割回数換算など)</span></label>
+            <div class="scale-row">
+              <label class="inline">係数
+                <input type="number" class="scale-num" value="1" step="any" min="0" aria-label="係数の分子" />
+                <span aria-hidden="true">/</span>
+                <input type="number" class="scale-den" value="1" step="any" min="0" aria-label="係数の分母" />
+              </label>
+              <span class="scale-value hint"></span>
+            </div>
+            <p class="hint">例: PLAN を 1 回分にするなら 1 / 分割回数</p>
             <ul class="warnings"></ul>
           </div>
         </section>
@@ -44,7 +52,15 @@
             <label>線量 <select class="set-select"></select></label>
             <p class="set-summary"></p>
             <details class="file-list"><summary></summary><ul></ul></details>
-            <label class="inline">係数 <input type="number" class="scale" value="1" step="0.01" min="0" /> <span class="hint">(分割回数換算など)</span></label>
+            <div class="scale-row">
+              <label class="inline">係数
+                <input type="number" class="scale-num" value="1" step="any" min="0" aria-label="係数の分子" />
+                <span aria-hidden="true">/</span>
+                <input type="number" class="scale-den" value="1" step="any" min="0" aria-label="係数の分母" />
+              </label>
+              <span class="scale-value hint"></span>
+            </div>
+            <p class="hint">例: PLAN を 1 回分にするなら 1 / 分割回数</p>
             <ul class="warnings"></ul>
           </div>
         </section>

@@ -1,6 +1,6 @@
 import type { jsPDF as JsPDF } from 'jspdf';
 import type { AnalysisResult } from '../core/runner.ts';
-import type { DoseSet } from '../dicom/group.ts';
+import { formatScale, scaleFactor, type DoseScale, type DoseSet } from '../dicom/group.ts';
 import { doseColorMap, gammaColorMap, type ColorMap } from '../ui/colormap.ts';
 import { drawHistogram, LIGHT_CHART_THEME } from '../ui/histogram-chart.ts';
 import { histSpecs, type DdUnit, type Derived } from '../ui/results.ts';
@@ -8,7 +8,7 @@ import { drawSlice, PLANES, renderSlice, voxelToImage, type Ijk, type Plane } fr
 
 export interface ReportSide {
   set: DoseSet;
-  scale: number;
+  scale: DoseScale;
 }
 
 export interface ReportInput {
@@ -133,7 +133,7 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
 
   let y = heading('データ', 26);
   const side = (s: ReportSide) =>
-    `${s.set.label}\n${s.set.doses.length} ファイル / ${s.set.summary}${s.scale !== 1 ? ` / 係数 ×${s.scale}` : ''}`;
+    `${s.set.label}\n${s.set.doses.length} ファイル / ${s.set.summary}${scaleFactor(s.scale) !== 1 ? ` / 係数 ${formatScale(s.scale)}` : ''}`;
   const sameFor = input.ref.set.frameOfReferenceUID === input.ev.set.frameOfReferenceUID;
   const patient = input.includePatient
     ? `${input.ref.set.patientName || '(氏名なし)'}  /  ID: ${input.ref.set.patientId || '–'}`

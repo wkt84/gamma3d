@@ -157,8 +157,19 @@ input:disabled {
   color: var(--text-muted);
 }
 
-input[type='number'].scale {
-  width: 80px;
+input[type='number'].scale-num,
+input[type='number'].scale-den {
+  width: 64px;
+}
+
+input[aria-invalid='true'] {
+  border-color: var(--critical);
+}
+
+.scale-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 textarea {

@@ -2,7 +2,7 @@ import './style.css';
 import { DEFAULT_PARAMS, type AnalysisParams } from './core/gamma.ts';
 import { AnalysisCancelled, runAnalysis, type AnalysisResult } from './core/runner.ts';
 import { maxValue, resampleTo, type Volume } from './core/volume.ts';
-import { buildDoseSets, scaled, type DoseSet } from './dicom/group.ts';
+import { buildDoseSets, scaled, scaleFactor, type DoseScale, type DoseSet } from './dicom/group.ts';
 import { isRtDose, parseRtDose, type RtDose } from './dicom/rtdose.ts';
 import { ddColorMap, doseColorMap, dtaColorMap, gammaColorMap, gradientColorMap, type ColorMap } from './ui/colormap.ts';
 import { HistogramView, SlicePanel } from './ui/components.ts';
@@ -295,10 +295,22 @@ function renderSide(side: Side): void {
   );
 }
 
-function scaleOf(side: Side): number {
-  const v = Number($<HTMLInputElement>('.scale', side.root).value);
-  return Number.isFinite(v) && v > 0 ? v : 1;
+/** 係数 x / y を読む。不正な値の欄は赤枠にし、その欄は 1 として扱う */
+function scaleOf(side: Side): DoseScale {
+  const read = (sel: string) => {
+    const input = $<HTMLInputElement>(sel, side.root);
+    const v = Number(input.value);
+    const ok = input.value.trim() !== '' && Number.isFinite(v) && v > 0;
+    input.setAttribute('aria-invalid', String(!ok));
+    return ok ? v : 1;
+  };
+  const s = { num: read('.scale-num'), den: read('.scale-den') };
+  const f = scaleFactor(s);
+  $('.scale-value', side.root).textContent = s.num === 1 && s.den === 1 ? '' : `= ${Number(f.toPrecision(6))} 倍`;
+  return s;
 }
+
+const factorOf = (side: Side): number => scaleFactor(scaleOf(side));
 
 /** データ・係数が変わったとき: 結果を破棄して表示を作り直す */
 function onDataChanged(resetCursor: boolean): void {
@@ -308,11 +320,11 @@ function onDataChanged(resetCursor: boolean): void {
   const ref = sides.ref.selected;
   const ev = sides.eval.selected;
   if (ref) {
-    const refVol = scaled(ref.volume, scaleOf(sides.ref));
+    const refVol = scaled(ref.volume, factorOf(sides.ref));
     let evalOnRef: Float32Array | null = null;
     let max = maxValue(refVol.data);
     if (ev) {
-      evalOnRef = resampleTo(scaled(ev.volume, scaleOf(sides.eval)), refVol, NaN).data;
+      evalOnRef = resampleTo(scaled(ev.volume, factorOf(sides.eval)), refVol, NaN).data;
       for (let n = 0; n < evalOnRef.length; n++) if (evalOnRef[n] > max) max = evalOnRef[n];
     }
     const sameGrid = display && display.ref.dims.join() === refVol.dims.join();
@@ -378,7 +390,9 @@ for (const side of Object.values(sides)) {
     renderSide(side);
     onDataChanged(true);
   });
-  $<HTMLInputElement>('.scale', side.root).addEventListener('change', () => onDataChanged(false));
+  for (const sel of ['.scale-num', '.scale-den']) {
+    $<HTMLInputElement>(sel, side.root).addEventListener('change', () => onDataChanged(false));
+  }
 }
 
 // ───────── 解析条件 ─────────
@@ -480,7 +494,7 @@ runBtn.addEventListener('click', async () => {
   runStatus.textContent = '計算中…';
   updateButtons();
   try {
-    const ev = scaled(sides.eval.selected.volume, scaleOf(sides.eval));
+    const ev = scaled(sides.eval.selected.volume, factorOf(sides.eval));
     result = await runAnalysis(display.ref, ev, params, (f) => (progress.value = f), abort.signal);
     derived = derive(result);
     stale = false;

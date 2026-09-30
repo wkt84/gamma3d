@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { newUid, writeRtDose, type RtDoseSpec } from '../scripts/dicom-writer.ts';
-import { buildDoseSets } from '../src/dicom/group.ts';
+import { buildDoseSets, formatScale, scaled, scaleFactor } from '../src/dicom/group.ts';
 import { isRtDose, parseRtDose } from '../src/dicom/rtdose.ts';
 import { createSampler } from '../src/core/volume.ts';
 
@@ -84,5 +84,15 @@ describe('RTDOSE 読み込み', () => {
     expect(sets[1].doses.map((d) => d.fileName)).toEqual(['b1.dcm', 'b2.dcm']);
     expect(sets[1].maxDose).toBeCloseTo(1.5, 5);
     expect(sets[1].warnings).toEqual([]);
+  });
+});
+
+describe('線量の係数 (x / y)', () => {
+  it('係数の計算と表示', () => {
+    expect(scaleFactor({ num: 1, den: 30 })).toBeCloseTo(1 / 30, 12);
+    expect(formatScale({ num: 30, den: 1 })).toBe('×30');
+    expect(formatScale({ num: 1, den: 30 })).toBe('×1/30 (= 0.0333333)');
+    const v = { dims: [2, 1, 1] as [number, number, number], spacing: [1, 1, 1] as [number, number, number], origin: [0, 0, 0] as [number, number, number], data: new Float32Array([60, 30]) };
+    expect(Array.from(scaled(v, scaleFactor({ num: 1, den: 30 })).data)).toEqual([2, 1]);
   });
 });
