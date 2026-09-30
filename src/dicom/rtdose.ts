@@ -2,6 +2,7 @@ import * as dicomParserNs from 'dicom-parser';
 import type { DataSet } from 'dicom-parser';
 import type { Volume } from '../core/volume.ts';
 import { LocalizedError, type Msg } from '../i18n/index.ts';
+import { charsetOf, formatPersonName, readText } from './charset.ts';
 
 // dicom-parser は UMD 配布のため、環境によって default 側に実体がある
 const dicomParser: typeof dicomParserNs =
@@ -33,7 +34,7 @@ const SUPPORTED_TS = new Set([TS_IMPLICIT_LE, '1.2.840.10008.1.2.1']);
 
 export class NotRtDoseError extends LocalizedError {}
 
-function parse(bytes: Uint8Array, untilTag?: string): DataSet {
+export function parse(bytes: Uint8Array, untilTag?: string): DataSet {
   try {
     return dicomParser.parseDicom(bytes, untilTag ? { untilTag } : undefined);
   } catch (e) {
@@ -47,18 +48,20 @@ function parse(bytes: Uint8Array, untilTag?: string): DataSet {
 }
 
 /**
- * ファイル先頭だけを読んで RTDOSE かどうかを判定する (フォルダ内の CT 等を素早く除外するため)。
+ * ファイル先頭だけを読んで Modality を返す (フォルダ内の CT 等を、本体を読まずに除外するため)。
  * untilTag は完全一致で止まるため Modality 自体を指定する。途中で切れた場合も、
  * dicom-parser は解析済みの要素を例外の dataSet に入れて返すので、それも見る。
  */
-export function isRtDose(bytes: Uint8Array): boolean {
+export function peekModality(bytes: Uint8Array): string {
   const modality = (ds: DataSet | undefined) => (ds?.string('x00080060') ?? '').trim().toUpperCase();
   try {
-    return modality(parse(bytes, 'x00080060')) === 'RTDOSE';
+    return modality(parse(bytes, 'x00080060'));
   } catch (e) {
-    return modality((e as { dataSet?: DataSet } | null)?.dataSet) === 'RTDOSE';
+    return modality((e as { dataSet?: DataSet } | null)?.dataSet);
   }
 }
+
+export const isRtDose = (bytes: Uint8Array): boolean => peekModality(bytes) === 'RTDOSE';
 
 const str = (ds: DataSet, tag: string): string => (ds.string(tag) ?? '').trim();
 
@@ -94,6 +97,7 @@ export function parseRtDose(buffer: ArrayBuffer, fileName: string): RtDose {
   const bytes = new Uint8Array(buffer);
   const ds = parse(bytes);
   const warnings: Msg[] = [];
+  const cs = charsetOf(ds);
 
   const modality = str(ds, 'x00080060').toUpperCase();
   if (modality !== 'RTDOSE') throw new NotRtDoseError((m) => m.dicom.notRtdose(fileName, modality));
@@ -223,10 +227,10 @@ export function parseRtDose(buffer: ArrayBuffer, fileName: string): RtDose {
     seriesInstanceUID: str(ds, 'x0020000e'),
     studyInstanceUID: str(ds, 'x0020000d'),
     frameOfReferenceUID: str(ds, 'x00200052'),
-    patientName: str(ds, 'x00100010').replace(/\^+/g, ' ').trim(),
+    patientName: formatPersonName(readText(ds, 'x00100010', cs)),
     patientId: str(ds, 'x00100020'),
-    seriesDescription: str(ds, 'x0008103e'),
-    manufacturer: str(ds, 'x00080070'),
+    seriesDescription: readText(ds, 'x0008103e', cs),
+    manufacturer: readText(ds, 'x00080070', cs),
     summationType: str(ds, 'x3004000a').toUpperCase() || 'UNKNOWN',
     doseUnits: units,
     doseType: str(ds, 'x30040004').toUpperCase(),

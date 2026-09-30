@@ -8,11 +8,13 @@ import { drawSlice, PLANES, renderSlice, voxelToImage, type Ijk, type Plane } fr
 import type { Vec3 } from '../core/volume.ts';
 import { judge, type ActionLevels, type Judgment } from '../core/judgment.ts';
 import type { GammaStats } from '../core/stats.ts';
+import type { RtPlan } from '../dicom/rtplan.ts';
 import { m, text as msgText, type Msg } from '../i18n/index.ts';
 
 export interface ReportSide {
   set: DoseSet;
   scale: DoseScale;
+  plan: RtPlan | null;
 }
 
 export interface ReportInput {
@@ -144,7 +146,13 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
 
   let y = heading(t.data, 26);
   const side = (s: ReportSide) =>
-    t.side(msgText(s.set.label), s.set.doses.length, msgText(s.set.summary), scaleFactor(s.scale) !== 1 ? formatScale(s.scale) : null);
+    t.side(
+      msgText(s.set.label),
+      s.set.doses.length,
+      msgText(s.set.summary),
+      scaleFactor(s.scale) !== 1 ? formatScale(s.scale) : null,
+      s.plan ? t.plan(s.plan.label || s.plan.name || s.plan.fileName, s.plan.fractions) : null,
+    );
   const sameFor = input.ref.set.frameOfReferenceUID === input.ev.set.frameOfReferenceUID;
   const shifted = input.shift.some((v) => v !== 0);
   const [sx, sy, sz] = input.shift.map((v) => (v > 0 ? `+${v}` : `${v}`));

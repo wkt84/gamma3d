@@ -277,3 +277,28 @@ test('標準 4 条件をまとめて計算し、比較表から表示を切り�
   const [download] = await Promise.all([page.waitForEvent('download'), page.click('#pdf')]);
   expect(download.suggestedFilename()).toMatch(/\.pdf$/);
 });
+
+test('RTPLAN を一緒に読み込むと、分割回数・ビーム名を表示し、1 回分への換算ができる', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('[data-side="ref"] .file-input').setInputFiles([...REF, `${SAMPLES}ref/rtplan.dcm`]);
+  await page.locator('[data-side="eval"] .file-input').setInputFiles([...EVAL, `${SAMPLES}eval/rtplan.dcm`]);
+  await expect(page.locator('#run')).toBeEnabled();
+
+  const ev = page.locator('[data-side="eval"]');
+  await expect(ev.locator('.plan-info')).toHaveText('プラン TPS-B ・ 30 回 ・ ビーム 2 門');
+  await expect(ev.locator('.file-list summary')).toHaveText('RTDOSE 2 ・ RTPLAN 1 / 3 ファイル');
+  await expect(ev.locator('.file-list li').first()).toContainText('#1 G30 212.4 MU');
+
+  const norm = Number(await page.locator('#p-normdose').inputValue());
+  const ref = page.locator('[data-side="ref"]');
+  await ref.locator('.per-fraction').click();
+  await expect(ref.locator('.scale-num')).toHaveValue('1');
+  await expect(ref.locator('.scale-den')).toHaveValue('30');
+  expect(Number(await page.locator('#p-normdose').inputValue())).toBeCloseTo(norm / 30, 3);
+});
+
+test('RTPLAN がなければプランの表示と換算ボタンは出ない', async ({ page }) => {
+  await load(page);
+  await expect(page.locator('[data-side="ref"] .plan-info')).toBeHidden();
+  await expect(page.locator('[data-side="ref"] .per-fraction')).toBeHidden();
+});

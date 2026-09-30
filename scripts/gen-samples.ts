@@ -2,6 +2,8 @@
  * 動作確認用の合成 RTDOSE を samples/ に書き出す。
  *
  *   samples/ref/plan.dcm         比較元: PLAN 線量 (2.5 mm 格子)
+ *   samples/ref/rtplan.dcm, samples/eval/rtplan.dcm
+ *                                それぞれの RTPLAN (30 回分割、ビーム 2 門)
  *   samples/eval/beam1.dcm, beam2.dcm
  *                                比較先: BEAM 線量 ×2 (3 mm 格子、x 方向に +1 mm ずれ、+1.5%、ノイズあり、
  *                                        beam1 に半径 12 mm の +6% ホットスポット)
@@ -9,7 +11,7 @@
  * 実行: npm run gen:samples
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { newUid, writeRtDose, type RtDoseSpec } from './dicom-writer.ts';
+import { newUid, writeRtDose, writeRtPlan, type RtDoseSpec } from './dicom-writer.ts';
 
 function erf(x: number): number {
   // Abramowitz & Stegun 7.1.26
@@ -123,4 +125,19 @@ for (const beam of [0, 1]) {
   );
 }
 
-console.log('samples/ に合成 RTDOSE を書き出しました (ref: PLAN ×1, eval: BEAM ×2)');
+// 分割回数とビーム名を表示するための RTPLAN
+const beams = [
+  { number: 1, name: 'G30', meterset: 212.4 },
+  { number: 2, name: 'G330', meterset: 208.9 },
+];
+for (const [dir, uid, label, name] of [
+  ['ref', refPlan, 'TPS-A', 'TPS A 前立腺'],
+  ['eval', evalPlan, 'TPS-B', 'TPS B 前立腺'],
+] as const) {
+  writeFileSync(
+    `samples/${dir}/rtplan.dcm`,
+    writeRtPlan({ sopUID: uid, label, name, fractions: 30, beams, seriesUID: newUid(), ...common }),
+  );
+}
+
+console.log('samples/ に合成 RTDOSE と RTPLAN を書き出しました (ref: PLAN ×1, eval: BEAM ×2, RTPLAN 各 1)');

@@ -42,7 +42,11 @@ export const ja = {
     shiftReset: '0 に戻す',
     swap: '比較元と比較先を入れ替え',
     swapTitle: '線量・警告・係数をまとめて入れ替えます (解析結果は破棄されます)',
-    fileCount: (rtdose: N, total: N) => `RTDOSE ${rtdose} / ${total} ファイル`,
+    fileCount: (rtdose: N, rtplan: N, total: N) => `RTDOSE ${rtdose}${rtplan ? ` ・ RTPLAN ${rtplan}` : ''} / ${total} ファイル`,
+    plan: (label: S, fractions: N | null, beams: N) => `プラン ${label}${fractions ? ` ・ ${fractions} 回` : ''} ・ ビーム ${beams} 門`,
+    perFraction: (n: N) => `1 回分に換算 (係数 1 / ${n})`,
+    planMismatch: '読み込んだ RTPLAN は、選択中の線量の参照プランと一致しません',
+    beam: (n: N, name: S, mu: S | null) => `#${n} ${name}${mu ? ` ${mu} MU` : ''}`,
   },
 
   params: {
@@ -207,6 +211,7 @@ export const ja = {
     tagCount: (file: S, name: S, n: N) => `${file}: ${name} の要素数が不正です (${n})`,
     tagValue: (file: S, tag: S) => `${file}: タグ ${tag} の値が不正です`,
     noScaling: 'DoseGridScaling がないため 1 として扱いました',
+    notRtplan: (file: S, modality: S) => `${file}: RTPLAN ではありません (Modality=${modality || '不明'})`,
     orientation: (file: S, iop: S) =>
       `${file}: 非対応の向きです (ImageOrientationPatient=${iop})。Axial 系のみ対応しています。`,
     noPixelData: (file: S) => `${file}: PixelData がありません`,
@@ -239,8 +244,9 @@ export const ja = {
     hidden: '(非表示)',
     ref: '比較元 (Ref)',
     eval: '比較先 (Eval)',
-    side: (label: S, files: N, summary: S, scale: S | null) =>
-      `${label}\n${files} ファイル / ${summary}${scale ? ` / 係数 ${scale}` : ''}`,
+    side: (label: S, files: N, summary: S, scale: S | null, plan: S | null) =>
+      `${label}\n${files} ファイル / ${summary}${scale ? ` / 係数 ${scale}` : ''}${plan ? `\n${plan}` : ''}`,
+    plan: (label: S, fractions: N | null) => `プラン ${label}${fractions ? ` (${fractions} 回)` : ''}`,
     frame: '座標系',
     frameSame: 'FrameOfReferenceUID 一致',
     frameDifferent: 'FrameOfReferenceUID 不一致 (位置合わせなしで比較)',

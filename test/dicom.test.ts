@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { newUid, writeRtDose, type RtDoseSpec } from '../scripts/dicom-writer.ts';
+import { newUid, writeRtDose, writeRtPlan, type RtDoseSpec } from '../scripts/dicom-writer.ts';
 import { buildDoseSets, formatScale, scaled, scaleFactor } from '../src/dicom/group.ts';
-import { isRtDose, parseRtDose } from '../src/dicom/rtdose.ts';
+import { isRtDose, parseRtDose, peekModality } from '../src/dicom/rtdose.ts';
+import { parseRtPlan } from '../src/dicom/rtplan.ts';
 import { createSampler } from '../src/core/volume.ts';
 
 const toBuffer = (b: Uint8Array): ArrayBuffer => b.slice().buffer;
@@ -94,5 +95,44 @@ describe('線量の係数 (x / y)', () => {
     expect(formatScale({ num: 1, den: 30 })).toBe('×1/30 (= 0.0333333)');
     const v = { dims: [2, 1, 1] as [number, number, number], spacing: [1, 1, 1] as [number, number, number], origin: [0, 0, 0] as [number, number, number], data: new Float32Array([60, 30]) };
     expect(Array.from(scaled(v, scaleFactor({ num: 1, den: 30 })).data)).toEqual([2, 1]);
+  });
+});
+
+describe('RTPLAN (B1)', () => {
+  const planSpec = {
+    sopUID: '1.2.3.4',
+    label: 'PROSTATE',
+    name: '前立腺 VMAT',
+    fractions: 39,
+    beams: [
+      { number: 2, name: 'ARC2', meterset: 301.25 },
+      { number: 1, name: 'ARC1', meterset: 298.5 },
+    ],
+    patientName: 'TEST^PATIENT',
+    patientId: 'P001',
+    studyUID: '1.2.3.10',
+    seriesUID: '1.2.3.11',
+    forUID: '1.2.3.9',
+  };
+
+  it('分割回数・ビーム名・MU を読む', () => {
+    const buf = writeRtPlan(planSpec);
+    expect(peekModality(buf.slice(0, 1024))).toBe('RTPLAN');
+    expect(isRtDose(buf)).toBe(false);
+    const p = parseRtPlan(toBuffer(buf), 'plan.dcm');
+    expect(p.sopInstanceUID).toBe('1.2.3.4');
+    expect(p.label).toBe('PROSTATE');
+    expect(p.name).toBe('前立腺 VMAT');
+    expect(p.fractions).toBe(39);
+    expect(p.beams).toEqual([
+      { number: 1, name: 'ARC1', meterset: 298.5 },
+      { number: 2, name: 'ARC2', meterset: 301.25 },
+    ]);
+  });
+
+  it('分割回数がなければ null、RTDOSE を渡せばエラー', () => {
+    expect(parseRtPlan(toBuffer(writeRtPlan({ ...planSpec, fractions: null })), 'p.dcm').fractions).toBeNull();
+    const dose = writeRtDose(spec({ ipp: [0, 0, 0] }, () => 1));
+    expect(() => parseRtPlan(toBuffer(dose), 'dose.dcm')).toThrow(/RTPLAN ではありません/);
   });
 });
