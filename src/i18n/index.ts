@@ -55,6 +55,7 @@ const ATTRS: [string, (el: HTMLElement, s: string) => void][] = [
   ['data-i18n-title', (el, s) => (el.title = s)],
   ['data-i18n-aria-label', (el, s) => el.setAttribute('aria-label', s)],
   ['data-i18n-placeholder', (el, s) => el.setAttribute('placeholder', s)],
+  ['data-i18n-label', (el, s) => el.setAttribute('label', s)],
 ];
 
 export const I18N_ATTRIBUTES = ATTRS.map(([a]) => a);

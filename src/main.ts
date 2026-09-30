@@ -9,6 +9,15 @@ import { HistogramView, SlicePanel } from './ui/components.ts';
 import { derive, histSpecs, type DdUnit, type Derived } from './ui/results.ts';
 import { imageToVoxel, PLANES, renderSlice, voxelToImage, type Ijk, type Plane } from './ui/slice.ts';
 import { applyTranslations, errorMsg, m, text, type Messages, type Msg } from './i18n/index.ts';
+import {
+  browserStorage,
+  normalizeName,
+  parseFile as parsePresetFile,
+  PresetStore,
+  serialize as serializePresets,
+  validateParams,
+  type PresetParams,
+} from './ui/presets.ts';
 
 // ───────── 状態 ─────────
 
@@ -410,23 +419,6 @@ normAuto.addEventListener('change', () => {
   markStale();
 });
 
-preset.addEventListener('change', () => {
-  if (preset.value === 'custom') return;
-  const [dd, dta] = preset.value.split(',');
-  $<HTMLInputElement>('#p-dd').value = dd;
-  $<HTMLInputElement>('#p-dta').value = dta;
-  markStale();
-});
-
-for (const id of ['#p-dd', '#p-dta']) {
-  $(id).addEventListener('input', () => {
-    const key = `${num('#p-dd')},${num('#p-dta')}`;
-    preset.value = [...preset.options].some((o) => o.value === key) ? key : 'custom';
-  });
-}
-
-$$<HTMLInputElement>('.params input').forEach((i) => i.addEventListener('change', markStale));
-
 function markStale(): void {
   if (result && !stale) {
     stale = true;
@@ -434,13 +426,14 @@ function markStale(): void {
   }
 }
 
-function readParams(): AnalysisParams {
-  const p: AnalysisParams = {
-    ...DEFAULT_PARAMS,
+/** 画面の入力欄の値 (検証前) */
+function formValues(): PresetParams {
+  return {
     ddPercent: num('#p-dd'),
     dtaMm: num('#p-dta'),
     local: $<HTMLInputElement>('input[name="norm"]:checked').value === 'local',
-    normDoseGy: num('#p-normdose'),
+    normAuto: normAuto.checked,
+    normDoseGy: normAuto.checked ? null : num('#p-normdose'),
     gammaThresholdPercent: num('#p-gthr'),
     ddThresholdPercent: num('#p-ddthr'),
     ddLowGradientOnly: $<HTMLInputElement>('#p-ddlow').checked,
@@ -448,20 +441,168 @@ function readParams(): AnalysisParams {
     gammaCap: num('#p-cap'),
     stepsPerDta: Math.round(num('#p-steps')),
   };
+}
+
+/** 入力欄に条件を入れる */
+function applyForm(p: PresetParams): void {
+  const set = (id: string, v: number) => ($<HTMLInputElement>(id).value = String(v));
+  set('#p-dd', p.ddPercent);
+  set('#p-dta', p.dtaMm);
+  $<HTMLInputElement>(`input[name="norm"][value="${p.local ? 'local' : 'global'}"]`).checked = true;
+  normAuto.checked = p.normAuto;
+  if (!p.normAuto && p.normDoseGy !== null) normInput.value = String(p.normDoseGy);
+  set('#p-gthr', p.gammaThresholdPercent);
+  set('#p-ddthr', p.ddThresholdPercent);
+  $<HTMLInputElement>('#p-ddlow').checked = p.ddLowGradientOnly;
+  set('#p-grad', p.gradientThresholdPercentPerMm);
+  set('#p-cap', p.gammaCap);
+  set('#p-steps', p.stepsPerDta);
+  updateNormDose();
+  markStale();
+}
+
+/** 条件を検証し、不正なら理由を投げる。requireNormDose: 基準線量の値まで確かめるか (解析実行時) */
+function checkForm(p: PresetParams, requireNormDose: boolean): void {
   const bad = (cond: boolean, msg: string) => {
     if (cond) throw new Error(msg);
   };
   const e = m().params.invalid;
   bad(!(p.ddPercent > 0), e.dd);
   bad(!(p.dtaMm > 0), e.dta);
-  bad(!(p.normDoseGy > 0), e.normDose);
+  if (requireNormDose || !p.normAuto) bad(!(num('#p-normdose') > 0), e.normDose);
   bad(!(p.gammaThresholdPercent >= 0 && p.gammaThresholdPercent < 100), e.gammaThreshold);
   bad(!(p.ddThresholdPercent >= 0 && p.ddThresholdPercent < 100), e.ddThreshold);
   bad(!(p.gradientThresholdPercentPerMm >= 0), e.gradient);
   bad(!(p.gammaCap >= 1 && p.gammaCap <= 3), e.cap);
   bad(!(p.stepsPerDta >= 2 && p.stepsPerDta <= 20), e.steps);
-  return p;
 }
+
+function readParams(): AnalysisParams {
+  const f = formValues();
+  checkForm(f, true);
+  const { normAuto: _auto, normDoseGy: _norm, ...rest } = f;
+  return { ...DEFAULT_PARAMS, ...rest, normDoseGy: num('#p-normdose') };
+}
+
+// ───────── プリセット ─────────
+
+const SAVED_PREFIX = 'saved:';
+const presetStore = new PresetStore(browserStorage());
+const savedGroup = document.createElement('optgroup');
+savedGroup.label = m().presets.savedGroup;
+preset.insertBefore(savedGroup, preset.querySelector('option[value="custom"]'));
+const presetStatus = $('#preset-status');
+const presetDelete = $<HTMLButtonElement>('#preset-delete');
+
+function renderPresetOptions(selected?: string): void {
+  savedGroup.replaceChildren(...presetStore.all().map((p) => new Option(p.name, SAVED_PREFIX + p.name)));
+  savedGroup.hidden = savedGroup.children.length === 0;
+  if (selected !== undefined) preset.value = selected;
+  presetDelete.disabled = !preset.value.startsWith(SAVED_PREFIX);
+}
+
+/** 入力欄の値に合う選択肢にする (保存した条件のままならそのまま、違えば標準の基準か「カスタム」) */
+function syncPresetSelect(): void {
+  const f = formValues();
+  if (preset.value.startsWith(SAVED_PREFIX)) {
+    const saved = presetStore.get(preset.value.slice(SAVED_PREFIX.length));
+    if (saved && JSON.stringify(saved.params) === JSON.stringify(validateParams(f))) return;
+  }
+  const key = `${f.ddPercent},${f.dtaMm}`;
+  preset.value = [...preset.options].some((o) => o.value === key) ? key : 'custom';
+  presetDelete.disabled = true;
+}
+
+preset.addEventListener('change', () => {
+  presetDelete.disabled = !preset.value.startsWith(SAVED_PREFIX);
+  if (preset.value === 'custom') return;
+  if (preset.value.startsWith(SAVED_PREFIX)) {
+    const saved = presetStore.get(preset.value.slice(SAVED_PREFIX.length));
+    if (saved) applyForm(saved.params);
+    return;
+  }
+  const [dd, dta] = preset.value.split(',');
+  $<HTMLInputElement>('#p-dd').value = dd;
+  $<HTMLInputElement>('#p-dta').value = dta;
+  markStale();
+});
+
+$$<HTMLInputElement>('.params input').forEach((i) => {
+  if (i.closest('.presets')) return;
+  i.addEventListener('input', syncPresetSelect);
+  i.addEventListener('change', () => {
+    syncPresetSelect();
+    markStale();
+  });
+});
+
+$('#preset-save').addEventListener('click', () => {
+  const t = m().presets;
+  const name = normalizeName($<HTMLInputElement>('#preset-name').value);
+  if (!name) {
+    presetStatus.textContent = t.nameRequired;
+    return;
+  }
+  const f = formValues();
+  try {
+    checkForm(f, false);
+  } catch (e) {
+    presetStatus.textContent = t.invalidParams((e as Error).message);
+    return;
+  }
+  const params = validateParams(f);
+  if (!params) return;
+  const existed = !!presetStore.get(name);
+  presetStore.save(name, params);
+  renderPresetOptions(SAVED_PREFIX + name);
+  presetStatus.textContent = existed ? t.overwritten(name) : t.saved(name);
+});
+
+presetDelete.addEventListener('click', () => {
+  if (!preset.value.startsWith(SAVED_PREFIX)) return;
+  const name = preset.value.slice(SAVED_PREFIX.length);
+  presetStore.remove(name);
+  renderPresetOptions();
+  syncPresetSelect();
+  presetStatus.textContent = m().presets.deleted(name);
+});
+
+$('#preset-export').addEventListener('click', () => {
+  const t = m().presets;
+  const all = presetStore.all();
+  if (!all.length) {
+    presetStatus.textContent = t.noneToExport;
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([serializePresets(all)], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'gamma3d-presets.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  presetStatus.textContent = t.exported(all.length);
+});
+
+const presetFile = $<HTMLInputElement>('#preset-file');
+$('#preset-import').addEventListener('click', () => presetFile.click());
+presetFile.addEventListener('change', async () => {
+  const file = presetFile.files?.[0];
+  presetFile.value = '';
+  if (!file) return;
+  const t = m().presets;
+  try {
+    const { presets, rejected } = parsePresetFile(await file.text());
+    presetStore.import(presets);
+    renderPresetOptions();
+    syncPresetSelect();
+    presetStatus.textContent = t.imported(presets.length, rejected);
+  } catch {
+    presetStatus.textContent = t.importError;
+  }
+});
+
+renderPresetOptions();
+if (!presetStore.persistent) presetStatus.textContent = m().presets.notPersistent;
 
 // ───────── 解析実行 ─────────
 
