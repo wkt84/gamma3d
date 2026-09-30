@@ -1,7 +1,7 @@
 import type { ColorMap } from './colormap.ts';
 import { drawHistogram, themeFromCss, type BarHit, type HistSpec } from './histogram-chart.ts';
 import { drawProfile, type ProfileGeometry, type ProfileSpec } from './profile-chart.ts';
-import { drawSlice, fitRect, type SliceImage } from './slice.ts';
+import { drawSlice, FULL_VIEW, viewRect, type SliceImage, type SliceView } from './slice.ts';
 import { m } from '../i18n/index.ts';
 
 function setupCanvas(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext2D; w: number; h: number } | null {
@@ -35,10 +35,16 @@ export class SlicePanel {
   private image: SliceImage | null = null;
   private cross: [number, number] | null = null;
   private wheelAcc = 0;
+  private view: SliceView = FULL_VIEW;
+  private drag: { x: number; y: number; moved: boolean } | null = null;
 
   onPick: (u: number, v: number) => void = () => {};
   onHover: (uv: [number, number] | null) => void = () => {};
   onWheel: (dir: number) => void = () => {};
+  /** Ctrl+ホイール: 倍率を f 倍に。anchor はマウス位置 (画像の幅・高さに対する割合) */
+  onZoom: (f: number, anchor: [number, number]) => void = () => {};
+  /** ドラッグ (拡大中のみ): 中心を画像の割合でずらす */
+  onPan: (du: number, dv: number) => void = () => {};
 
   constructor(fig: HTMLElement, title: string, headExtra?: HTMLElement) {
     const head = el('div', 'panel-head');
@@ -60,14 +66,48 @@ export class SlicePanel {
       const uv = this.hit(e);
       if (uv) this.onPick(uv[0], uv[1]);
     });
-    this.canvas.addEventListener('pointermove', (e) => this.onHover(this.hit(e)));
+    // 拡大中はドラッグで表示位置を動かす
+    this.canvas.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || this.view.zoom === 1 || !this.image) return;
+      this.drag = { x: e.clientX, y: e.clientY, moved: false };
+      this.canvas.setPointerCapture(e.pointerId);
+    });
+    this.canvas.addEventListener('pointermove', (e) => {
+      if (this.drag && this.image) {
+        const r = this.rect()!;
+        const du = (e.clientX - this.drag.x) / r.w;
+        const dv = (e.clientY - this.drag.y) / r.h;
+        if (du || dv) {
+          this.drag = { x: e.clientX, y: e.clientY, moved: true };
+          this.canvas.classList.add('dragging');
+          this.onPan(-du, -dv);
+        }
+        return;
+      }
+      this.onHover(this.hit(e));
+    });
+    const endDrag = () => {
+      this.drag = null;
+      this.canvas.classList.remove('dragging');
+    };
+    this.canvas.addEventListener('pointerup', endDrag);
+    this.canvas.addEventListener('pointercancel', endDrag);
     this.canvas.addEventListener('pointerleave', () => this.onHover(null));
-    // ホイールでスライス送り。マウスのノッチは 1 回 1 スライス、トラックパッドの細かい量は累積して送る
+    // ホイールでスライス送り。マウスのノッチは 1 回 1 スライス、トラックパッドの細かい量は累積して送る。
+    // Ctrl (Mac は Cmd) を押しながら、またはトラックパッドのピンチでズーム
     this.canvas.addEventListener(
       'wheel',
       (e) => {
         e.preventDefault();
         const dy = e.deltaMode === WheelEvent.DOM_DELTA_PIXEL ? e.deltaY : e.deltaY * 40;
+        if (e.ctrlKey || e.metaKey) {
+          const r = this.rect();
+          if (!r) return;
+          const rect = this.canvas.getBoundingClientRect();
+          const anchor: [number, number] = [(e.clientX - rect.left - r.x) / r.w, (e.clientY - rect.top - r.y) / r.h];
+          this.onZoom(Math.exp(-dy * 0.002), anchor);
+          return;
+        }
         if (Math.abs(dy) >= WHEEL_STEP) {
           this.wheelAcc = 0;
           this.onWheel(Math.sign(dy));
@@ -86,6 +126,12 @@ export class SlicePanel {
 
   setTitle(t: string): void {
     this.title.textContent = t;
+  }
+
+  setView(view: SliceView): void {
+    this.view = view;
+    this.canvas.classList.toggle('zoomed', view.zoom > 1);
+    this.redraw();
   }
 
   show(image: SliceImage, cross: [number, number] | null): void {
@@ -129,13 +175,20 @@ export class SlicePanel {
     const c = setupCanvas(this.canvas);
     if (!c) return;
     c.ctx.clearRect(0, 0, c.w, c.h);
-    if (this.image) drawSlice(c.ctx, this.image, c.w, c.h, this.cross);
+    if (this.image) drawSlice(c.ctx, this.image, c.w, c.h, this.cross, undefined, this.view);
+  }
+
+  /** 画像の配置 (キャンバス内の CSS ピクセル) */
+  private rect(): { x: number; y: number; w: number; h: number } | null {
+    if (!this.image) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    return viewRect(this.image, rect.width, rect.height, this.view);
   }
 
   private hit(e: MouseEvent): [number, number] | null {
     if (!this.image) return null;
     const rect = this.canvas.getBoundingClientRect();
-    const r = fitRect(this.image, rect.width, rect.height);
+    const r = viewRect(this.image, rect.width, rect.height, this.view);
     const u = Math.floor(((e.clientX - rect.left - r.x) / r.w) * this.image.width);
     const v = Math.floor(((e.clientY - rect.top - r.y) / r.h) * this.image.height);
     if (u < 0 || v < 0 || u >= this.image.width || v >= this.image.height) return null;

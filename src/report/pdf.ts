@@ -1,7 +1,7 @@
 import type { jsPDF as JsPDF } from 'jspdf';
 import type { AnalysisResult } from '../core/runner.ts';
 import { formatScale, scaleFactor, type DoseScale, type DoseSet } from '../dicom/group.ts';
-import { doseColorMap, gammaColorMap, type ColorMap } from '../ui/colormap.ts';
+import { doseColorMap, gammaColorMap, type ColorMap, type DoseWindow } from '../ui/colormap.ts';
 import { drawHistogram, LIGHT_CHART_THEME } from '../ui/histogram-chart.ts';
 import { histSpecs, type DdUnit, type Derived } from '../ui/results.ts';
 import { drawSlice, PLANES, renderSlice, voxelToImage, type Ijk, type Plane } from '../ui/slice.ts';
@@ -25,6 +25,8 @@ export interface ReportInput {
   ref: ReportSide;
   ev: ReportSide;
   displayMax: number;
+  /** 線量の表示範囲 (画面と同じ。ズームは反映せず、断面は全体を載せる) */
+  doseWindow: Partial<DoseWindow>;
   /** 比較先の平行移動 (mm) */
   shift: Vec3;
   /** 判定基準 (不正なら null で、判定は載せない) */
@@ -367,7 +369,7 @@ export async function generateReport(input: ReportInput): Promise<Blob> {
   doc.addPage();
   const [cx, cy, cz] = [0, 1, 2].map((a) => r.ref.origin[a] + input.cursor[a] * r.ref.spacing[a]);
   y = heading(t.slices(cx.toFixed(1), cy.toFixed(1), cz.toFixed(1)), 13);
-  const doseMap = doseColorMap(input.displayMax);
+  const doseMap = doseColorMap(input.displayMax, input.doseWindow);
   const gMap = gammaColorMap(p.gammaCap);
   const bg: [number, number, number] = [10, 10, 10];
   const labelW = 16;
