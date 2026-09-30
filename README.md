@@ -1,5 +1,8 @@
 # Gamma3D
 
+> [!WARNING]
+> **NOT FOR CLINICAL USE.** 本ソフトウェアは研究・教育・検証用です。医療機器として承認・認証されたものではなく、患者の診断・治療・治療計画の検証などの臨床判断に使用しないでください。計算結果の正確性は保証されません。
+
 2 つの RTDOSE をブラウザ上で比較する 3 次元ガンマ解析ツールです。静的サイトとして配信でき、DICOM データはブラウザの外へ送信されません。
 
 - 比較元 (Ref) と比較先 (Eval) の RTDOSE を読み込み、3D ガンマ・線量差 (DD)・DTA を計算する
@@ -68,6 +71,11 @@ public/fonts Noto Sans JP (SIL Open Font License、OFL.txt 同梱)
 
 GitHub リポジトリを Vercel に接続すると、`main` への push で自動デプロイされます。ビルド設定とヘッダーは `vercel.json` に定義してあり、Node のバージョンは `package.json` の `engines` (24.x) で指定しています。
 
-## 注意
+## ライセンス
 
-本ツールは線量分布を比較するための補助ツールです。臨床で使う前に、施設の QA 手順に従い、既存の検証済みソフトウェアとの比較などで妥当性を確認してください。
+[MIT License](LICENSE)
+
+同梱・利用しているサードパーティのライセンス:
+
+- Noto Sans JP (`public/fonts/`): SIL Open Font License 1.1 ([OFL.txt](public/fonts/OFL.txt))。フォントは MIT ではなく OFL で配布します
+- dicom-parser, jsPDF とその依存パッケージ: MIT (DOMPurify は MPL-2.0 / Apache-2.0 のデュアルライセンス、pako は MIT / Zlib)

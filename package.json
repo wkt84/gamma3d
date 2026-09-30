@@ -2,6 +2,7 @@
   "name": "gamma3d",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "3D gamma analysis for RTDOSE (browser-based, static)",
   "type": "module",
   "scripts": {
