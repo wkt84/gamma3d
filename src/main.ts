@@ -160,6 +160,7 @@ function showReadout(ijk: Ijk): void {
     parts.push(`勾配 ${f(result.grad[n], 1)}%/mm`);
   }
   readout.textContent = parts.join('  ・  ');
+  readout.title = readout.textContent;
 }
 
 function syncSlider(): void {

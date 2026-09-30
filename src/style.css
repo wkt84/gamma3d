@@ -374,6 +374,7 @@ progress {
 }
 
 .summary {
+  flex-shrink: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -424,8 +425,14 @@ progress {
 .toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 6px 14px;
   align-items: center;
+  /* 縦方向の flex コンテナ内で縮められないようにする */
+  flex-shrink: 0;
+}
+
+.toolbar > * {
+  flex-shrink: 0;
 }
 
 .slice-ctrl {
@@ -440,15 +447,27 @@ progress {
 
 #slice-label {
   font-variant-numeric: tabular-nums;
-  min-width: 110px;
+  /* 位置の桁数でスライダーが動かないよう幅を確保する */
+  min-width: 21ch;
   color: var(--text-primary);
+  white-space: nowrap;
 }
 
+/*
+ * 値表示は常に専用の 2 行目に置き、高さを 1 行分に固定する。
+ * ホバー位置によって文字数が変わっても、下の画像がずれない。
+ */
 .readout {
+  flex: 1 1 100%;
+  min-width: 0;
   font-size: 12px;
+  line-height: 18px;
+  height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
-  margin-left: auto;
 }
 
 .grid {
@@ -586,6 +605,13 @@ figure {
   margin: auto;
   color: var(--text-muted);
   font-size: 12px;
+}
+
+/* 幅が足りないときは操作ヒントを隠し、ツールバーを 2 行に保つ */
+@media (max-width: 1400px) {
+  .toolbar .hint {
+    display: none;
+  }
 }
 
 @media (max-width: 1100px) {
