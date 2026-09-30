@@ -201,3 +201,26 @@ test('既定では WebAssembly で計算し、?engine=ts (TypeScript 版) と同
   await expect(page.locator('#run-status')).toContainText('TypeScript');
   expect(await summary()).toBe(wasm);
 });
+
+test('比較先を平行移動 (手動シフト) すると結果に反映され、入れ替えると向きが反転する', async ({ page }) => {
+  const passRate = async () => Number((await page.locator('.stat .value').first().textContent())!.replace('%', ''));
+  await load(page);
+  await page.fill('#p-dd', '1');
+  await page.fill('#p-dta', '1');
+  await analyze(page);
+  const before = await passRate();
+
+  // サンプルの比較先は x 方向に +1 mm ずれているので、−1 mm 動かすと合う
+  const x = page.locator('[data-side="eval"] .shift[data-axis="0"]');
+  await x.fill('-1');
+  await x.press('Tab');
+  await expect(page.locator('#pdf')).toBeDisabled(); // 結果は破棄される
+  await analyze(page);
+  const after = await passRate();
+  expect(after).toBeGreaterThan(before + 1);
+
+  await page.click('#swap');
+  await expect(x).toHaveValue('1');
+  await page.click('[data-side="eval"] .shift-reset');
+  await expect(x).toHaveValue('0');
+});

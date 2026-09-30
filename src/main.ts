@@ -1,7 +1,7 @@
 import './style.css';
 import { DEFAULT_PARAMS, type AnalysisParams } from './core/gamma.ts';
 import { AnalysisCancelled, runAnalysis, type AnalysisResult } from './core/runner.ts';
-import { maxValue, resampleTo, type Volume } from './core/volume.ts';
+import { maxValue, resampleTo, shiftVolume, type Vec3, type Volume } from './core/volume.ts';
 import { buildDoseSets, scaled, scaleFactor, type DoseScale, type DoseSet } from './dicom/group.ts';
 import { isRtDose, parseRtDose, type RtDose } from './dicom/rtdose.ts';
 import { ddColorMap, doseColorMap, dtaColorMap, gammaColorMap, gradientColorMap, type ColorMap } from './ui/colormap.ts';
@@ -320,6 +320,28 @@ function scaleOf(side: Side): DoseScale {
 
 const factorOf = (side: Side): number => scaleFactor(scaleOf(side));
 
+const shiftInputs = $$<HTMLInputElement>('.shift', sides.eval.root);
+
+/** 比較先の平行移動 (mm)。不正な値の欄は赤枠にし、0 として扱う */
+function shiftOf(): Vec3 {
+  const s: Vec3 = [0, 0, 0];
+  for (const input of shiftInputs) {
+    const v = input.value.trim() === '' ? 0 : Number(input.value);
+    const ok = Number.isFinite(v);
+    input.setAttribute('aria-invalid', String(!ok));
+    s[Number(input.dataset.axis)] = ok ? v : 0;
+  }
+  return s;
+}
+
+const isShifted = (s: Vec3) => s.some((v) => v !== 0);
+const formatShift = (s: Vec3) => s.map((v) => (v > 0 ? `+${v}` : `${v}`)) as [string, string, string];
+
+/** 解析に使う比較先 (係数と平行移動を適用したもの) */
+function evalVolume(set: DoseSet): Volume {
+  return shiftVolume(scaled(set.volume, factorOf(sides.eval)), shiftOf());
+}
+
 /** データ・係数が変わったとき: 結果を破棄して表示を作り直す */
 function onDataChanged(resetCursor: boolean): void {
   if (result) runStatus.textContent = '';
@@ -333,7 +355,7 @@ function onDataChanged(resetCursor: boolean): void {
     let evalOnRef: Float32Array | null = null;
     let max = maxValue(refVol.data);
     if (ev) {
-      evalOnRef = resampleTo(scaled(ev.volume, factorOf(sides.eval)), refVol, NaN).data;
+      evalOnRef = resampleTo(evalVolume(ev), refVol, NaN).data;
       for (let n = 0; n < evalOnRef.length; n++) if (evalOnRef[n] > max) max = evalOnRef[n];
     }
     const sameGrid = display && display.ref.dims.join() === refVol.dims.join();
@@ -404,6 +426,12 @@ for (const side of Object.values(sides)) {
   }
 }
 
+for (const input of shiftInputs) input.addEventListener('change', () => onDataChanged(false));
+$('.shift-reset', sides.eval.root).addEventListener('click', () => {
+  shiftInputs.forEach((i) => (i.value = '0'));
+  onDataChanged(false);
+});
+
 /** 比較元と比較先を入れ替える (線量・候補・警告・係数)。解析結果は破棄する */
 const swapBtn = $<HTMLButtonElement>('#swap');
 swapBtn.addEventListener('click', () => {
@@ -418,6 +446,11 @@ swapBtn.addEventListener('click', () => {
     const x = $<HTMLInputElement>(sel, a.root);
     const y = $<HTMLInputElement>(sel, b.root);
     [x.value, y.value] = [y.value, x.value];
+  }
+  // 比較先を s 動かすのは比較元を −s 動かすのと同じなので、入れ替えたら向きを反転して位置関係を保つ
+  for (const input of shiftInputs) {
+    const v = Number(input.value);
+    if (Number.isFinite(v) && v !== 0) input.value = String(-v);
   }
   renderSide(a);
   renderSide(b);
@@ -657,7 +690,7 @@ runBtn.addEventListener('click', async () => {
   runStatus.textContent = m().run.running;
   updateButtons();
   try {
-    const ev = scaled(sides.eval.selected.volume, factorOf(sides.eval));
+    const ev = evalVolume(sides.eval.selected);
     result = await runAnalysis(display.ref, ev, params, (f) => (progress.value = f), abort.signal);
     derived = derive(result);
     stale = false;
@@ -683,7 +716,11 @@ function crossWarnings(): Msg[] {
   const a = sides.ref.selected;
   const b = sides.eval.selected;
   if (a && b) {
-    if (a.frameOfReferenceUID !== b.frameOfReferenceUID) out.push((t) => t.summary.warnFrameOfReference);
+    if (a.frameOfReferenceUID !== b.frameOfReferenceUID) {
+      const shift = shiftOf();
+      const [x, y, z] = formatShift(shift);
+      out.push(isShifted(shift) ? (t) => t.summary.warnFrameOfReferenceShifted(`(${x}, ${y}, ${z})`) : (t) => t.summary.warnFrameOfReference);
+    }
     if (a.patientId !== b.patientId) out.push((t) => t.summary.warnPatientId(a.patientId || '–', b.patientId || '–'));
   }
   if (result) {
@@ -777,6 +814,7 @@ pdfBtn.addEventListener('click', async () => {
       ref: { set: sides.ref.selected, scale: scaleOf(sides.ref) },
       ev: { set: sides.eval.selected, scale: scaleOf(sides.eval) },
       displayMax: display.max,
+      shift: shiftOf(),
       warnings: [...crossWarnings(), ...sides.ref.selected.warnings, ...sides.eval.selected.warnings, ...(stale ? [(t: Messages) => t.report.staleWarning] : [])],
       cursor: [...cursor] as Ijk,
       includePatient: $<HTMLInputElement>('#r-patient').checked,
