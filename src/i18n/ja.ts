@@ -139,6 +139,9 @@ export const ja = {
     plane: '断面',
     slice: 'スライス',
     hint: 'ホイール: スライス送り ・ ダブルクリック: 十字カーソル移動',
+    bottomView: '下段の表示',
+    histograms: 'ヒストグラム',
+    profiles: 'プロファイル',
     mapType: 'マップの種類',
     ddUnit: '線量差の単位',
     refPanel: '比較元 (Ref)',
@@ -153,6 +156,14 @@ export const ja = {
     histEmpty: { dd: '線量差ヒストグラム', dta: 'DTA ヒストグラム', gamma: 'ガンマヒストグラム' },
     tooltip: (label: S, count: S, percent: S) => `${label}: ${count} 点 (${percent}%)`,
     separator: '  ・  ',
+  },
+
+  profile: {
+    title: (axis: S, a: S, b: S) => `${axis} プロファイル (${a}, ${b} mm)`,
+    xLabel: (axis: S) => `${axis} [mm]`,
+    ref: 'Ref',
+    eval: 'Eval',
+    empty: '比較元の RTDOSE を読み込むと表示されます',
   },
 
   judgment: {

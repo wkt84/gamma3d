@@ -144,6 +144,9 @@ export const en: Messages = {
     plane: 'Plane',
     slice: 'Slice',
     hint: 'Wheel: change slice · Double-click: move crosshair',
+    bottomView: 'Bottom row',
+    histograms: 'Histograms',
+    profiles: 'Profiles',
     mapType: 'Map type',
     ddUnit: 'Dose difference unit',
     refPanel: 'Reference (Ref)',
@@ -158,6 +161,14 @@ export const en: Messages = {
     histEmpty: { dd: 'Dose difference histogram', dta: 'DTA histogram', gamma: 'Gamma histogram' },
     tooltip: (label: S, count: S, percent: S) => `${label}: ${count} points (${percent}%)`,
     separator: '  ·  ',
+  },
+
+  profile: {
+    title: (axis: S, a: S, b: S) => `${axis} profile (${a}, ${b} mm)`,
+    xLabel: (axis: S) => `${axis} [mm]`,
+    ref: 'Ref',
+    eval: 'Eval',
+    empty: 'Shown after the reference RTDOSE is loaded',
   },
 
   judgment: {

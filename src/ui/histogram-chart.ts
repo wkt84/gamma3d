@@ -10,6 +10,9 @@ export interface ChartTheme {
   axis: string;
   pass: string;
   fail: string;
+  /** 系列の色 (カテゴリ配色の 1・2 番目。プロファイルの Ref / Eval) */
+  series1: string;
+  series2: string;
   font: string;
 }
 
@@ -22,6 +25,8 @@ export const LIGHT_CHART_THEME: ChartTheme = {
   axis: '#c3c2b7',
   pass: '#2a78d6',
   fail: '#d03b3b',
+  series1: '#2a78d6',
+  series2: '#eb6834',
   font: 'sans-serif',
 };
 
@@ -38,6 +43,8 @@ export function themeFromCss(el: Element): ChartTheme {
     axis: v('--axis'),
     pass: v('--chart-pass'),
     fail: v('--chart-fail'),
+    series1: v('--series-1'),
+    series2: v('--series-2'),
     font: s.fontFamily,
   };
 }
@@ -69,7 +76,7 @@ export interface BarHit {
 const BASE_PAD = { l: 44, r: 12, t: 40, b: 38 };
 
 /** 目盛り間隔を 1, 2, 2.5, 5 ×10^k から選び、4 目盛り前後になる上限と間隔を返す */
-function niceAxis(v: number): { max: number; step: number } {
+export function niceAxis(v: number): { max: number; step: number } {
   const raw = Math.max(v, 0.1) / 4;
   const e = Math.pow(10, Math.floor(Math.log10(raw)));
   const step = ([1, 2, 2.5, 5, 10].find((m) => m * e >= raw) ?? 10) * e;
