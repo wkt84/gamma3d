@@ -141,6 +141,13 @@ export const en: Messages = {
     fontError: (file: S) => `Could not load the font (${file})`,
   },
 
+  pwa: {
+    offlineReady: 'Ready to work offline (saved in this browser)',
+    updateReady: 'A new version is available. Updating reloads the page (loaded data and results will be cleared)',
+    update: 'Update',
+    close: 'Close',
+  },
+
   export: {
     title: 'Export results',
     includePatient: 'Include patient information',

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 
 const SAMPLES = new URL('../samples/', import.meta.url).pathname;
@@ -607,4 +607,62 @@ test('結果を CSV・JSON・マップ (NRRD の ZIP) で書き出せ、値が�
   }
   expect((100 * pass) / n).toBeCloseTo(shownRate, 2);
   await expect(page.locator('#export-status')).toContainText('書き出しました');
+});
+
+test('一度開くとオフラインでも起動し、共有メモリ・WebAssembly で解析して PDF を出力できる (PWA)', async ({ browser }) => {
+  const context = await browser.newContext({ serviceWorkers: 'allow', locale: 'ja-JP', viewport: { width: 1600, height: 1000 } });
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('/');
+  // アプリ一式 (フォントを含む) をキャッシュし終え、Service Worker がこの画面を制御するまで待つ
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 60_000 });
+  await expect(page.locator('#toast')).toContainText('オフラインでも使えるようになりました');
+  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', '/manifest.webmanifest');
+
+  await context.setOffline(true);
+  await page.reload();
+  expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
+  // クエリ付きの URL でも開ける
+  await page.goto('/?lang=en');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await page.goto('/?lang=ja');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ja');
+
+  await page.locator('[data-side="ref"] .file-input').setInputFiles(REF);
+  await page.locator('[data-side="eval"] .file-input').setInputFiles(EVAL);
+  await analyze(page);
+  await expect(page.locator('#run-status')).toContainText('WebAssembly');
+  await expect(page.locator('#run-status')).not.toContainText('共有メモリなし');
+  await page.fill('#r-reviewer', '確認 太郎'); // 日本語フォント (約 5MB ×2) もキャッシュから読む
+  const [download] = await Promise.all([page.waitForEvent('download', { timeout: 60_000 }), page.click('#pdf')]);
+  expect(readFileSync((await download.path())!).subarray(0, 5).toString()).toBe('%PDF-');
+  await expect(page.locator('#pdf-status')).toContainText('出力しました');
+  expect(errors).toEqual([]);
+  await context.close();
+});
+
+test('新しい版の Service Worker が入ると通知し、「更新」で切り替えて読み込み直す (PWA)', async ({ browser }) => {
+  const context = await browser.newContext({ serviceWorkers: 'allow', locale: 'ja-JP' });
+  const page = await context.newPage();
+  await page.goto('/');
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 60_000 });
+  // 新しい版の配信を、配信中の sw.js (vite preview は dist/ をそのまま返す) の内容を変えて再現する。
+  // 他のテストは Service Worker を使わないので影響しない
+  const swPath = new URL('../dist/sw.js', import.meta.url).pathname;
+  const original = readFileSync(swPath, 'utf8');
+  try {
+    writeFileSync(swPath, `${original}\n// next version\n`);
+    await page.evaluate(async () => (await navigator.serviceWorker.getRegistration())!.update());
+    const toastEl = page.locator('#toast');
+    await expect(toastEl).toContainText('新しいバージョンがあります', { timeout: 60_000 });
+    await page.evaluate(() => ((window as unknown as { marker: number }).marker = 1));
+    await toastEl.locator('.action').click();
+    // 読み込み直すと、画面の状態 (marker) は消える
+    await page.waitForFunction(() => (window as unknown as { marker?: number }).marker === undefined, null, { timeout: 30_000 });
+    await expect(toastEl).toBeHidden();
+  } finally {
+    writeFileSync(swPath, original);
+    await context.close();
+  }
 });

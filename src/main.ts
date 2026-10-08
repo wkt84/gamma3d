@@ -1375,6 +1375,77 @@ pdfBtn.addEventListener('click', async () => {
   }
 });
 
+// ───────── オフライン対応 (PWA) ─────────
+
+const toast = $('#toast');
+let toastMsg: Msg | null = null;
+let toastLabel: Msg | null = null;
+let toastTimer = 0;
+
+function renderToast(): void {
+  $('.text', toast).textContent = toastMsg ? text(toastMsg) : '';
+  $('.action', toast).textContent = toastLabel ? text(toastLabel) : '';
+}
+
+/** 右下の通知を出す。action を渡すとボタンを付け、autoHideMs を渡すと自動で閉じる */
+function showToast(msg: Msg, action?: { label: Msg; run: () => void }, autoHideMs?: number): void {
+  toastMsg = msg;
+  toastLabel = action?.label ?? null;
+  const button = $<HTMLButtonElement>('.action', toast);
+  button.hidden = !action;
+  button.onclick = action ? action.run : null;
+  renderToast();
+  toast.hidden = false;
+  clearTimeout(toastTimer);
+  if (autoHideMs) toastTimer = window.setTimeout(hideToast, autoHideMs);
+}
+
+function hideToast(): void {
+  toast.hidden = true;
+  toastMsg = null;
+  toastLabel = null;
+}
+
+$('.close', toast).addEventListener('click', hideToast);
+
+/**
+ * Service Worker を登録する (本番ビルドのみ)。初回はアプリ一式をキャッシュし終えたら知らせる。
+ * 新しい版がインストールされたら、すぐには切り替えず「更新」で切り替える (解析中の画面を消さないため)。
+ */
+async function registerServiceWorker(): Promise<void> {
+  const sw = navigator.serviceWorker;
+  let reloading = false;
+  sw.addEventListener('controllerchange', () => {
+    if (reloading) location.reload();
+  });
+  const reg = await sw.register(`${import.meta.env.BASE_URL}sw.js`);
+  const offerUpdate = (waiting: ServiceWorker) =>
+    showToast((t) => t.pwa.updateReady, {
+      label: (t) => t.pwa.update,
+      run: () => {
+        reloading = true;
+        waiting.postMessage({ type: 'SKIP_WAITING' });
+      },
+    });
+  if (reg.waiting && sw.controller) offerUpdate(reg.waiting);
+  reg.addEventListener('updatefound', () => {
+    const installing = reg.installing;
+    installing?.addEventListener('statechange', () => {
+      if (installing.state !== 'installed') return;
+      if (sw.controller) offerUpdate(installing);
+      else showToast((t) => t.pwa.offlineReady, undefined, 8000);
+    });
+  });
+  // 開いたままの画面でも、1 時間ごとに新しい版を確かめる
+  setInterval(() => void reg.update().catch(() => {}), 60 * 60 * 1000);
+}
+
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  registerServiceWorker().catch(() => {
+    // 登録できない環境 (プライベートブラウズなど) では、オンラインでのみ使う
+  });
+}
+
 // 言語の切り替え: 文言を入れ直し、表示中のものを作り直す
 onLangChange(() => {
   applyTranslations();
@@ -1390,6 +1461,7 @@ onLangChange(() => {
   renderCharts();
   renderSummary();
   for (const [el, msg] of statusMsgs) el.textContent = text(msg);
+  renderToast();
 });
 
 // 初期表示
