@@ -16,6 +16,8 @@ export default defineConfig({
     viewport: { width: 1600, height: 1000 },
     // 画面の言語はブラウザの言語設定で決まる。既存のテストは日本語の画面で確かめる
     locale: 'ja-JP',
+    // Service Worker (オフライン対応) は、それを確かめるテストでだけ有効にする
+    serviceWorkers: 'block',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1600, height: 1000 }, locale: 'ja-JP' } }],
   webServer: {

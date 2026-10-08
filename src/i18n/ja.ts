@@ -136,6 +136,13 @@ export const ja = {
     fontError: (file: S) => `フォントを読み込めません (${file})`,
   },
 
+  pwa: {
+    offlineReady: 'オフラインでも使えるようになりました (このブラウザに保存済み)',
+    updateReady: '新しいバージョンがあります。更新すると画面を読み込み直します (読み込んだデータと結果は消えます)',
+    update: '更新',
+    close: '閉じる',
+  },
+
   export: {
     title: '結果の書き出し',
     includePatient: '患者情報を含める',

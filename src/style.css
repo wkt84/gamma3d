@@ -812,6 +812,41 @@ figure {
   width: 100%;
 }
 
+/* 画面右下の通知 (オフライン対応の完了・新しいバージョン) */
+.toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(460px, calc(100vw - 32px));
+  padding: 10px 10px 10px 14px;
+  background: var(--surface-3);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  font-size: 13px;
+}
+
+.toast[hidden] {
+  display: none;
+}
+
+.toast .text {
+  flex: 1;
+}
+
+.toast button {
+  flex: none;
+}
+
+.toast .close {
+  padding: 2px 8px;
+}
+
 .export-buttons {
   display: flex;
   flex-wrap: wrap;

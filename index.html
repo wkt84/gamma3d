@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="theme-color" content="#1a1a19" />
     <title>Gamma3D</title>
   </head>
   <body>
@@ -223,6 +226,12 @@
           <figure class="chart profile" id="profile-z"></figure>
         </div>
       </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden>
+      <span class="text"></span>
+      <button class="primary action" hidden></button>
+      <button class="close" data-i18n-aria-label="pwa.close" data-i18n-title="pwa.close">✕</button>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

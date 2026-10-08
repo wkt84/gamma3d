@@ -10,6 +10,7 @@
 - 結果は Axial / Sagittal / Coronal の断面表示と、DD・DTA・γ のヒストグラムで確認する
 - PDF レポートを出力する (Noto Sans JP を埋め込み、日本語に対応)
 - 画面と PDF は日本語と英語に対応する (右上で切り替え。初回はブラウザの言語設定に合わせる)
+- 一度開けばオフラインでも使える (PWA。アプリ一式とフォントをブラウザに保存する。インストールも可)
 
 ## 使い方
 
@@ -83,6 +84,7 @@ src/
   ui/        断面描画・カラーマップ・ヒストグラム・パネル部品
   report/    pdf.ts (jsPDF。フォントは PDF 出力時に遅延読み込み)
   export/    results.ts (CSV・JSON・マップの ZIP), nrrd.ts, zip.ts
+  sw/        sw.ts (オフライン対応の Service Worker。配信するファイルの一覧はビルド時に埋め込む)
   i18n/      ja.ts・en.ts (UI と PDF の文言の辞書)、index.ts (言語の選択・切り替えと、HTML の data-i18n 属性への適用)
 wasm/        Rust のガンマ探索カーネル (Cargo、rust-toolchain.toml)
 scripts/     dicom-writer.ts (テスト・サンプル用の RTDOSE 書き出し), gen-samples.ts,
@@ -91,6 +93,8 @@ public/fonts Noto Sans JP と、そこから英字・記号だけを取り出し
 ```
 
 ## デプロイ (Vercel)
+
+オフライン対応の Service Worker (`sw.js`) は、キャッシュした応答を COOP/COEP ヘッダーごと返すので、オフラインでも共有メモリと WebAssembly で計算できます。新しい版を配信すると、開いている画面に「更新」の通知が出ます (更新するまで切り替わりません)。
 
 GitHub リポジトリを Vercel に接続すると、`main` への push で自動デプロイされます。ビルド設定とヘッダーは `vercel.json` に定義してあり、Node のバージョンは `package.json` の `engines` (24.x) で指定しています。
 
